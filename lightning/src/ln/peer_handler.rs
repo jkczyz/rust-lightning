@@ -1150,7 +1150,7 @@ mod tests {
 		chan_handlers
 	}
 
-	fn create_network<'a>(peer_count: usize, chan_handlers: &'a Vec<test_utils::TestChannelMessageHandler>) -> Vec<PeerManager<FileDescriptor, &'a test_utils::TestChannelMessageHandler>> {
+	fn create_network(peer_count: usize, chan_handlers: &Vec<test_utils::TestChannelMessageHandler>) -> Vec<PeerManager<FileDescriptor, &test_utils::TestChannelMessageHandler>> {
 		let mut peers = Vec::new();
 		let mut rng = thread_rng();
 		let logger : Arc<Logger> = Arc::new(test_utils::TestLogger::new());
@@ -1172,7 +1172,7 @@ mod tests {
 		peers
 	}
 
-	fn establish_connection<'a>(peer_a: &PeerManager<FileDescriptor, &'a test_utils::TestChannelMessageHandler>, peer_b: &PeerManager<FileDescriptor, &'a test_utils::TestChannelMessageHandler>) {
+	fn establish_connection(peer_a: &PeerManager<FileDescriptor, &test_utils::TestChannelMessageHandler>, peer_b: &PeerManager<FileDescriptor, &test_utils::TestChannelMessageHandler>) {
 		let secp_ctx = Secp256k1::new();
 		let their_id = PublicKey::from_secret_key(&secp_ctx, &peer_b.our_node_secret);
 		let fd = FileDescriptor { fd: 1};
