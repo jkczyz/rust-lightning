@@ -1185,20 +1185,19 @@ mod tests {
 		// Simple test which builds a network of PeerManager, connects and brings them to NoiseState::Finished and
 		// push a DisconnectPeer event to remove the node flagged by id
 		let chan_handlers = create_chan_handlers(2);
-		let chan_handler = test_utils::TestChannelMessageHandler::new();
-		let mut peers = create_network(2, &chan_handlers);
+		let peers = create_network(2, &chan_handlers);
 		establish_connection(&peers[0], &peers[1]);
 		assert_eq!(peers[0].peers.lock().unwrap().peers.len(), 1);
 
 		let secp_ctx = Secp256k1::new();
 		let their_id = PublicKey::from_secret_key(&secp_ctx, &peers[1].our_node_secret);
-
+		let chan_handler = peers[0].message_handler.chan_handler;
 		chan_handler.pending_events.lock().unwrap().push(events::MessageSendEvent::HandleError {
 			node_id: their_id,
 			action: msgs::ErrorAction::DisconnectPeer { msg: None },
 		});
 		assert_eq!(chan_handler.pending_events.lock().unwrap().len(), 1);
-		peers[0].message_handler.chan_handler = &chan_handler;
+
 
 		peers[0].process_events();
 		assert_eq!(peers[0].peers.lock().unwrap().peers.len(), 0);
