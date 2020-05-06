@@ -2171,9 +2171,11 @@ impl<ChanSigner: ChannelKeys> Channel<ChanSigner> {
 			match err {
 				None => {
 					if update_add_htlcs.is_empty() && update_fulfill_htlcs.is_empty() && update_fail_htlcs.is_empty() && self.holding_cell_update_fee.is_none() {
-						// This should never actually happen and indicates we got some Errs back
-						// from update_fulfill_htlc/update_fail_htlc, but we handle it anyway in
-						// case there is some strange way to hit duplicate HTLC removes.
+						// Reaching this clause is an edge case: a user must (a) be at the edge
+						// of their channel send limits and (b) have a race occur where e.g.
+						// the remote adds an HTLC while another HTLC is in the holding cell
+						// or e.g. a fee update is finalized while an HTLC is in the holding
+						// cell.
 						return Ok(None);
 					}
 					let update_fee = if let Some(feerate) = self.holding_cell_update_fee {

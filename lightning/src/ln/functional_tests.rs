@@ -6127,6 +6127,63 @@ fn bolt2_open_channel_sending_node_checks_part2() {
 	assert!(PublicKey::from_slice(&node0_to_1_send_open_channel.delayed_payment_basepoint.serialize()).is_ok());
 }
 
+#[test]
+fn test_holding_cell_htlc_with_pending_fee_update() {
+	let chanmon_cfgs = create_chanmon_cfgs(2);
+	let node_cfgs = create_node_cfgs(2, &chanmon_cfgs);
+	let node_chanmgrs = create_node_chanmgrs(2, &node_cfgs, &[None, None]);
+	let mut nodes = create_network(2, &node_cfgs, &node_chanmgrs);
+	let chan = create_announced_chan_between_nodes_with_value(&nodes, 0, 1, 100000, 95000000, InitFeatures::known(), InitFeatures::known());
+	let logger = test_utils::TestLogger::new();
+
+	// First nodes[0] generates an update_fee, setting the channel's
+	// pending_update_fee.
+	nodes[0].node.update_fee(chan.2, get_feerate!(nodes[0], chan.2) + 20).unwrap();
+	check_added_monitors!(nodes[0], 1);
+
+	let events_0 = nodes[0].node.get_and_clear_pending_msg_events();
+	assert_eq!(events_0.len(), 1);
+	let (update_msg, commitment_signed) = match events_0[0] {
+		MessageSendEvent::UpdateHTLCs { updates: msgs::CommitmentUpdate { ref update_fee, ref commitment_signed, .. }, .. } => {
+			(update_fee.as_ref(), commitment_signed)
+		},
+		_ => panic!("Unexpected event"),
+	};
+
+	nodes[1].node.handle_update_fee(&nodes[0].node.get_our_node_id(), update_msg.unwrap());
+
+	let mut chan_stat = get_channel_value_stat!(nodes[0], chan.2);
+	let channel_reserve = chan_stat.channel_reserve_msat;
+	let feerate = get_feerate!(nodes[0], chan.2);
+
+	// 2* and +1 HTLCs on the commit tx fee calculation for the fee spike reserve.
+	let (_, our_payment_hash) = get_payment_preimage_hash!(nodes[0]);
+	let max_can_send = 5000000 - channel_reserve - 2*commit_tx_fee_msat(feerate, 1 + 1);
+	let net_graph_msg_handler = &nodes[0].net_graph_msg_handler;
+	let route = get_route(&nodes[0].node.get_our_node_id(), net_graph_msg_handler, &nodes[1].node.get_our_node_id(), None, &[], max_can_send, TEST_FINAL_CLTV, &logger).unwrap();
+
+	// Send a payment which passes reserve checks but gets stuck in the holding cell.
+	nodes[0].node.send_payment(&route, our_payment_hash, &None).unwrap();
+	chan_stat = get_channel_value_stat!(nodes[0], chan.2);
+	assert_eq!(chan_stat.holding_cell_outbound_amount_msat, max_can_send);
+
+	// Flush the pending fee update.
+	nodes[1].node.handle_commitment_signed(&nodes[0].node.get_our_node_id(), commitment_signed);
+	let (as_revoke_and_ack, _) = get_revoke_commit_msgs!(nodes[1], nodes[0].node.get_our_node_id());
+	check_added_monitors!(nodes[1], 1);
+	nodes[0].node.handle_revoke_and_ack(&nodes[1].node.get_our_node_id(), &as_revoke_and_ack);
+	check_added_monitors!(nodes[0], 1);
+
+	// Upon receipt of the RAA, there will be an attempt to resend the holding cell
+	// HTLC, but now that the fee has been raised the payment will now fail, causing
+	// it to be put back in the holding cell.
+	chan_stat = get_channel_value_stat!(nodes[0], chan.2);
+	assert_eq!(chan_stat.holding_cell_outbound_amount_msat, max_can_send);
+	nodes[0].logger.assert_log("lightning::ln::channel".to_string(), "Freeing holding cell with 1 HTLC updates".to_string(), 1);
+	let failure_log = format!("Failed to send HTLC with payment_hash {} due to Cannot send value that would put us under local channel reserve value", log_bytes!(our_payment_hash.0));
+	nodes[0].logger.assert_log("lightning::ln::channel".to_string(), failure_log.to_string(), 1);
+}
+
 // BOLT 2 Requirements for the Sender when constructing and sending an update_add_htlc message.
 // BOLT 2 Requirement: MUST NOT offer amount_msat it cannot pay for in the remote commitment transaction at the current feerate_per_kw (see "Updating Fees") while maintaining its channel reserve.
 //TODO: I don't believe this is explicitly enforced when sending an HTLC but as the Fee aspect of the BOLT specs is in flux leaving this as a TODO.
