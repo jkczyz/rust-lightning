@@ -30,7 +30,12 @@ pub struct SecretKey {
 	pub bytes: [u8; 32],
 }
 impl SecretKey {
-	// from_rust isn't implemented since we jsut return byte array refs directly
+	// from_rust isn't implemented for a ref since we just return byte array refs directly
+	pub(crate) fn from_rust(sk: SecpSecretKey) -> Self {
+		let mut bytes = [0; 32];
+		bytes.copy_from_slice(&sk[..]);
+		Self { bytes }
+	}
 	pub(crate) fn into_rust(&self) -> SecpSecretKey {
 		SecpSecretKey::from_slice(&self.bytes).unwrap()
 	}
