@@ -8,8 +8,5 @@ edition = "2018"
 syn = { version = "1", features = ["full", "extra-traits"] }
 proc-macro2 = "1"
 
-[profile.dev]
-opt-level = 1
-
 # We're not in the workspace as we're just a binary code generator:
 [workspace]
