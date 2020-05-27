@@ -1780,16 +1780,6 @@ impl<ChanSigner: ChannelKeys> Channel<ChanSigner> {
 			}
 		}
 
-		if self.channel_outbound {
-			// Check that they won't violate our local required channel reserve by adding this HTLC.
-
-			// +1 for this HTLC.
-			let local_commit_tx_fee_msat = self.next_local_commit_tx_fee_msat(1);
-			if self.value_to_self_msat < self.local_channel_reserve_satoshis * 1000 + local_commit_tx_fee_msat {
-				return Err(ChannelError::Ignore("Cannot receive value that would put us under local channel reserve value"));
-			}
-		}
-
 		let pending_value_to_self_msat =
 			self.value_to_self_msat + htlc_inbound_value_msat - removed_outbound_total_msat;
 		let pending_remote_value_msat =
@@ -1825,6 +1815,14 @@ impl<ChanSigner: ChannelKeys> Channel<ChanSigner> {
 						reason,
 					}));
 				}
+			}
+		} else {
+			// Check that they won't violate our local required channel reserve by adding this HTLC.
+
+			// +1 for this HTLC.
+			let local_commit_tx_fee_msat = self.next_local_commit_tx_fee_msat(1);
+			if self.value_to_self_msat < self.local_channel_reserve_satoshis * 1000 + local_commit_tx_fee_msat {
+				return Err(ChannelError::Ignore("Cannot receive value that would put us under local channel reserve value"));
 			}
 		}
 
@@ -4426,19 +4424,21 @@ mod tests {
 	use bitcoin::util::bip143;
 	use bitcoin::consensus::encode::serialize;
 	use bitcoin::blockdata::script::{Script, Builder};
+	use bitcoin::blockdata::block::BlockHeader;
 	use bitcoin::blockdata::transaction::{Transaction, TxOut};
 	use bitcoin::blockdata::constants::genesis_block;
 	use bitcoin::blockdata::opcodes;
 	use bitcoin::network::constants::Network;
 	use bitcoin::hashes::hex::FromHex;
 	use hex;
-	use ln::channelmanager::{HTLCSource, PaymentPreimage, PaymentHash};
+	use ln::channelmanager::{HTLCSource, PaymentPreimage, PaymentHash, PendingHTLCStatus, PendingHTLCInfo, PendingHTLCRouting};
 	use ln::channel::{Channel,ChannelKeys,InboundHTLCOutput,OutboundHTLCOutput,InboundHTLCState,OutboundHTLCState,HTLCOutputInCommitment,TxCreationKeys};
 	use ln::channel::MAX_FUNDING_SATOSHIS;
-	use ln::features::InitFeatures;
-	use ln::msgs::{OptionalField, DataLossProtect};
-	use ln::chan_utils;
+	use ln::features::{InitFeatures, NodeFeatures};
+	use ln::msgs::{OptionalField, DataLossProtect, UpdateAddHTLC};
+	use ln::{chan_utils, onion_utils};
 	use ln::chan_utils::{LocalCommitmentTransaction, ChannelPublicKeys};
+	use ln::features::ChannelFeatures;
 	use chain::chaininterface::{FeeEstimator,ConfirmationTarget};
 	use chain::keysinterface::{InMemoryChannelKeys, KeysInterface};
 	use chain::transaction::OutPoint;
@@ -4451,6 +4451,7 @@ mod tests {
 	use bitcoin::hashes::sha256::Hash as Sha256;
 	use bitcoin::hashes::Hash;
 	use bitcoin::hash_types::{Txid, WPubkeyHash};
+	use routing::router::RouteHop;
 	use std::sync::Arc;
 	use rand::{thread_rng,Rng};
 
@@ -4500,28 +4501,43 @@ mod tests {
 		PublicKey::from_secret_key(&secp_ctx, &SecretKey::from_slice(&hex::decode(hex).unwrap()[..]).unwrap())
 	}
 
-	#[test]
-	fn channel_reestablish_no_updates() {
-		let feeest = TestFeeEstimator{fee_est: 15000};
-		let logger = test_utils::TestLogger::new();
-		let secp_ctx = Secp256k1::new();
-		let mut seed = [0; 32];
-		let mut rng = thread_rng();
-		rng.fill_bytes(&mut seed);
-		let network = Network::Testnet;
-		let keys_provider = test_utils::TestKeysInterface::new(&seed, network);
+	struct ChanCfg {
+		fee_est: TestFeeEstimator,
+		logger: test_utils::TestLogger,
+		keys_mgr: test_utils::TestKeysInterface,
+	}
 
+	fn create_chan_cfgs(num_chans: usize) -> Vec<ChanCfg> {
+		let mut chan_cfgs = Vec::new();
+		for _ in 0..num_chans {
+			let fee_est = TestFeeEstimator{fee_est: 250 };
+			let logger = test_utils::TestLogger::new();
+			let mut seed = [0; 32];
+			let mut rng = thread_rng();
+			rng.fill_bytes(&mut seed);
+			let network = Network::Testnet;
+			let keys_mgr = test_utils::TestKeysInterface::new(&seed, network);
+			chan_cfgs.push(ChanCfg{ fee_est, logger, keys_mgr });
+		}
+
+		chan_cfgs
+	}
+
+	fn create_channels(cfgs: &Vec<ChanCfg>, amt: u64, push_amt_msat: u64) -> Vec<Channel<EnforcingChannelKeys>> {
 		// Go through the flow of opening a channel between two nodes.
+		let network = Network::Testnet;
 
 		// Create Node A's channel
+		let secp_ctx = Secp256k1::new();
 		let node_a_node_id = PublicKey::from_secret_key(&secp_ctx, &SecretKey::from_slice(&[42; 32]).unwrap());
-		let config = UserConfig::default();
-		let mut node_a_chan = Channel::<EnforcingChannelKeys>::new_outbound(&&feeest, &&keys_provider, node_a_node_id, 10000000, 100000, 42, &config).unwrap();
+		let mut config = UserConfig::default();
+		config.own_channel_config.minimum_depth = 1;
+		let mut node_a_chan = Channel::<EnforcingChannelKeys>::new_outbound(&&cfgs[0].fee_est, &&cfgs[0].keys_mgr, node_a_node_id, amt, push_amt_msat, 42, &config).unwrap();
 
 		// Create Node B's channel by receiving Node A's open_channel message
-		let open_channel_msg = node_a_chan.get_open_channel(genesis_block(network).header.bitcoin_hash(), &&feeest);
+		let open_channel_msg = node_a_chan.get_open_channel(genesis_block(network).header.bitcoin_hash(), &&cfgs[0].fee_est);
 		let node_b_node_id = PublicKey::from_secret_key(&secp_ctx, &SecretKey::from_slice(&[7; 32]).unwrap());
-		let mut node_b_chan = Channel::<EnforcingChannelKeys>::new_from_req(&&feeest, &&keys_provider, node_b_node_id, InitFeatures::known(), &open_channel_msg, 7, &config).unwrap();
+		let mut node_b_chan = Channel::<EnforcingChannelKeys>::new_from_req(&&cfgs[1].fee_est, &&cfgs[1].keys_mgr, node_b_node_id, InitFeatures::known(), &open_channel_msg, 7, &config).unwrap();
 
 		// Node B --> Node A: accept channel
 		let accept_channel_msg = node_b_chan.get_accept_channel();
@@ -4530,19 +4546,41 @@ mod tests {
 		// Node A --> Node B: funding created
 		let output_script = node_a_chan.get_funding_redeemscript();
 		let tx = Transaction { version: 1, lock_time: 0, input: Vec::new(), output: vec![TxOut {
-			value: 10000000, script_pubkey: output_script.clone(),
+			// TODO(vmw): I don't get why I need to convert the output script `to_v0_p2wsh()`
+			value: amt, script_pubkey: output_script.clone().to_v0_p2wsh(),
 		}]};
 		let funding_outpoint = OutPoint{ txid: tx.txid(), index: 0 };
-		let funding_created_msg = node_a_chan.get_outbound_funding_created(funding_outpoint, &&logger).unwrap();
-		let (funding_signed_msg, _) = node_b_chan.funding_created(&funding_created_msg, &&logger).unwrap();
+		let funding_created_msg = node_a_chan.get_outbound_funding_created(funding_outpoint, &&cfgs[0].logger).unwrap();
+		let (funding_signed_msg, _) = node_b_chan.funding_created(&funding_created_msg, &&cfgs[1].logger).unwrap();
 
 		// Node B --> Node A: funding signed
-		let _ = node_a_chan.funding_signed(&funding_signed_msg, &&logger);
+		assert!(node_a_chan.funding_signed(&funding_signed_msg, &&cfgs[0].logger).is_ok());
 
-		// Now disconnect the two nodes and check that the commitment point in
+		// Confirm the channels, which should bring them into operational state.
+		let header = BlockHeader { version: 0x20000000, prev_blockhash: Default::default(), merkle_root: Default::default(), time: 42, bits: 42, nonce: 42 };
+		let (funding_locked_msg_a, _) = match node_a_chan.block_connected(&header, 1, &[&tx; 1], &[0]) {
+			Ok(res) => res,
+			Err(_) => panic!(),
+		};
+		let (funding_locked_msg_b, _) = match node_b_chan.block_connected(&header, 1, &[&tx; 1], &[0]) {
+			Ok(res) => res,
+			Err(_) => panic!(),
+		};
+		assert!(node_b_chan.funding_locked(&funding_locked_msg_a.unwrap()).is_ok());
+		assert!(node_a_chan.funding_locked(&funding_locked_msg_b.unwrap()).is_ok());
+
+		vec![node_a_chan, node_b_chan]
+	}
+
+	#[test]
+	fn channel_reestablish_no_updates() {
+		let chan_cfgs = create_chan_cfgs(2);
+		let mut chans = create_channels(&chan_cfgs, 10000000, 100000);
+
+		// Disconnect the two nodes and check that the commitment point in
 		// Node B's channel_reestablish message is sane.
-		node_b_chan.remove_uncommitted_htlcs_and_mark_paused(&&logger);
-		let msg = node_b_chan.get_channel_reestablish(&&logger);
+		chans[1].remove_uncommitted_htlcs_and_mark_paused(&&chan_cfgs[1].logger);
+		let msg = chans[1].get_channel_reestablish(&&chan_cfgs[1].logger);
 		assert_eq!(msg.next_local_commitment_number, 1); // now called next_commitment_number
 		assert_eq!(msg.next_remote_commitment_number, 0); // now called next_revocation_number
 		match msg.data_loss_protect {
@@ -4554,14 +4592,81 @@ mod tests {
 
 		// Check that the commitment point in Node A's channel_reestablish message
 		// is sane.
-		node_a_chan.remove_uncommitted_htlcs_and_mark_paused(&&logger);
-		let msg = node_a_chan.get_channel_reestablish(&&logger);
+		chans[0].remove_uncommitted_htlcs_and_mark_paused(&&chan_cfgs[0].logger);
+		let msg = chans[0].get_channel_reestablish(&&chan_cfgs[0].logger);
 		assert_eq!(msg.next_local_commitment_number, 1); // now called next_commitment_number
 		assert_eq!(msg.next_remote_commitment_number, 0); // now called next_revocation_number
 		match msg.data_loss_protect {
 			OptionalField::Present(DataLossProtect { your_last_per_commitment_secret, .. }) => {
 				assert_eq!(your_last_per_commitment_secret, [0; 32]);
 			},
+			_ => panic!()
+		}
+	}
+
+	#[test]
+	#[should_panic]
+	#[test]
+	fn test_chan_reserve_violation_inbound_htlc_outbound_chan() {
+		let chan_cfgs = create_chan_cfgs(2);
+		let mut chans = create_channels(&chan_cfgs, 100000, 95000000);
+
+		// send_htlc would stop us from getting our balance this low, so we do it manually.
+		chans[0].value_to_self_msat = chans[0].local_channel_reserve_satoshis * 1000 + chans[0].next_local_commit_tx_fee_msat(1) - 1;
+
+		// Construct an update_add_htlc message to test that chans[0] will panic
+		// upon receipt of an update-add that puts it below its channel reserve.
+		let route_hop = RouteHop {
+			pubkey: chans[0].their_node_id,
+			node_features: NodeFeatures::known(),
+			short_channel_id: chans[0].short_channel_id.unwrap(),
+			channel_features: ChannelFeatures::known(),
+			fee_msat: 0,
+			cltv_expiry_delta: 0,
+		};
+		let route = vec![route_hop];
+
+		let secp_ctx = Secp256k1::new();
+		let mut session_priv_raw;
+		let session_priv = SecretKey::from_slice(&{
+			session_priv_raw = [0; 32];
+			let mut rng = thread_rng();
+			rng.fill_bytes(&mut session_priv_raw);
+			session_priv_raw
+		}).expect("RNG is bad!");
+
+		let payment_preimage = PaymentPreimage([0; 32]);
+		let payment_hash = PaymentHash(Sha256::hash(&payment_preimage.0[..]).into_inner());
+
+		let onion_keys = onion_utils::construct_onion_keys(&secp_ctx, &route, &session_priv).unwrap();
+		let onion_keys_2 = onion_utils::construct_onion_keys(&secp_ctx, &route, &session_priv).unwrap();
+		let (onion_payloads, htlc_msat, htlc_cltv) = onion_utils::build_onion_payloads(&route, 1, &None, 0).unwrap();
+		let (onion_payloads_2, _, _) = onion_utils::build_onion_payloads(&route, 1, &None, 0).unwrap();
+		let onion_packet = onion_utils::construct_onion_packet(onion_payloads, onion_keys, [0; 32], &payment_hash);
+		let onion_packet_2 = onion_utils::construct_onion_packet(onion_payloads_2, onion_keys_2, [0; 32], &payment_hash);
+		let msg = UpdateAddHTLC {
+			channel_id: chans[0].channel_id,
+			htlc_id: 1,
+			amount_msat: 1,
+			payment_hash,
+			cltv_expiry: htlc_cltv,
+			onion_routing_packet: onion_packet,
+		};
+
+		let pending_forward_state = PendingHTLCStatus::Forward(PendingHTLCInfo{
+			routing: PendingHTLCRouting::Forward{ onion_packet: onion_packet_2, short_channel_id: chans[0].short_channel_id.unwrap() },
+			incoming_shared_secret: session_priv_raw,
+			payment_hash,
+			amt_to_forward: htlc_msat,
+			outgoing_cltv_value: htlc_cltv
+		});
+
+		let create_onion_closure = |_chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus| {
+			None
+		};
+
+		match chans[0].update_add_htlc(&msg, pending_forward_state, create_onion_closure) {
+			Err(ChannelError::Ignore(msg)) => assert_eq!(msg, "Cannot receive value that would put us under local channel reserve value"),
 			_ => panic!()
 		}
 	}

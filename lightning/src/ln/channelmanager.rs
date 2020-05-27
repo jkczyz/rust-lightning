@@ -70,6 +70,20 @@ use std::ops::Deref;
 // our payment, which we can use to decode errors or inform the user that the payment was sent.
 
 #[derive(Clone)] // See Channel::revoke_and_ack for why, tl;dr: Rust bug
+#[cfg(test)]
+pub(crate) enum PendingHTLCRouting {
+	Forward {
+		onion_packet: msgs::OnionPacket,
+		short_channel_id: u64, // This should be NonZero<u64> eventually when we bump MSRV
+	},
+	Receive {
+		payment_data: Option<msgs::FinalOnionHopData>,
+		incoming_cltv_expiry: u32, // Used to track when we should expire pending HTLCs that go unclaimed
+	},
+}
+
+#[derive(Clone)] // See Channel::revoke_and_ack for why, tl;dr: Rust bug
+#[cfg(not(test))]
 enum PendingHTLCRouting {
 	Forward {
 		onion_packet: msgs::OnionPacket,
@@ -83,8 +97,17 @@ enum PendingHTLCRouting {
 
 #[derive(Clone)] // See Channel::revoke_and_ack for why, tl;dr: Rust bug
 pub(super) struct PendingHTLCInfo {
+	#[cfg(test)]
+	pub(super) routing: PendingHTLCRouting,
+	#[cfg(not(test))]
 	routing: PendingHTLCRouting,
+	#[cfg(test)]
+	pub(super) incoming_shared_secret: [u8; 32],
+	#[cfg(not(test))]
 	incoming_shared_secret: [u8; 32],
+	#[cfg(test)]
+	pub(super) payment_hash: PaymentHash,
+	#[cfg(not(test))]
 	payment_hash: PaymentHash,
 	pub(super) amt_to_forward: u64,
 	pub(super) outgoing_cltv_value: u32,
