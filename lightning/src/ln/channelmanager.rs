@@ -2535,19 +2535,23 @@ impl<ChanSigner: ChannelKeys, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> 
 						}));
 					}
 				}
-        let create_onion_error_packet = |chan: &Channel<ChanSigner>, pending_forward_info: &PendingHTLCStatus| {
-          match pending_forward_info {
-            &PendingHTLCStatus::Forward(PendingHTLCInfo { ref incoming_shared_secret, .. }) => {
-              let chan_update = self.get_channel_update(chan).unwrap();
-              Some(onion_utils::build_first_hop_failure_packet(incoming_shared_secret, 0x1000|7, &{
-                let mut res = Vec::with_capacity(8 + 128);
-                res.extend_from_slice(&byte_utils::be16_to_array(chan_update.contents.flags));
-                res.extend_from_slice(&chan_update.encode_with_len()[..]);
-                res
-              }[..]))
-            },
-            _ => None,
-          }
+				let create_onion_error_packet = |chan: &Channel<ChanSigner>, pending_forward_info: &PendingHTLCStatus| {
+					match pending_forward_info {
+						&PendingHTLCStatus::Forward(PendingHTLCInfo { ref incoming_shared_secret, .. }) => {
+							match self.get_channel_update(chan) {
+								Ok(upd) => {
+									Some(onion_utils::build_first_hop_failure_packet(incoming_shared_secret, 0x1000|7, &{
+										let mut res = Vec::with_capacity(8 + 128);
+										res.extend_from_slice(&byte_utils::be16_to_array(upd.contents.flags));
+										res.extend_from_slice(&upd.encode_with_len()[..]);
+										res
+									}[..]))
+								},
+								Err(_) => None,
+							}
+						},
+						_ => None,
+					}
 				};
         try_chan_entry!(self, chan.get_mut().update_add_htlc(&msg, pending_forward_info, create_onion_error_packet), channel_state, chan);
 			},
