@@ -4435,7 +4435,7 @@ mod tests {
 	use ln::channel::{Channel,ChannelKeys,InboundHTLCOutput,OutboundHTLCOutput,InboundHTLCState,OutboundHTLCState,HTLCOutputInCommitment,TxCreationKeys};
 	use ln::channel::MAX_FUNDING_SATOSHIS;
 	use ln::features::{InitFeatures, NodeFeatures};
-	use ln::msgs::{OptionalField, DataLossProtect, UpdateAddHTLC};
+	use ln::msgs::{OptionalField, DataLossProtect, UpdateAddHTLC, OnionErrorPacket};
 	use ln::{chan_utils, onion_utils};
 	use ln::chan_utils::{LocalCommitmentTransaction, ChannelPublicKeys};
 	use ln::features::ChannelFeatures;
@@ -4605,7 +4605,104 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic]
+	fn test_fee_spike_buffer_violation_inbound_htlc_inbound_chan() {
+		let chan_cfgs = create_chan_cfgs(2);
+		let mut chans = create_channels(&chan_cfgs, 100000, 95000000);
+
+		// Construct an update_add_htlc message to test that chans[1] will
+		// change a pending HTLC's status to failure upon receipt of a fee spike
+		// buffer violating HTLC offer.
+		let route_hop = RouteHop {
+			pubkey: chans[0].their_node_id,
+			node_features: NodeFeatures::known(),
+			short_channel_id: chans[0].short_channel_id.unwrap(),
+			channel_features: ChannelFeatures::known(),
+			fee_msat: 0,
+			cltv_expiry_delta: 0,
+		};
+		let route = vec![route_hop];
+
+		let secp_ctx = Secp256k1::new();
+		let mut session_priv_raw;
+		let session_priv = SecretKey::from_slice(&{
+			session_priv_raw = [0; 32];
+			let mut rng = thread_rng();
+			rng.fill_bytes(&mut session_priv_raw);
+			session_priv_raw
+		}).expect("RNG is bad!");
+
+		let payment_preimage = PaymentPreimage([0; 32]);
+		let payment_hash = PaymentHash(Sha256::hash(&payment_preimage.0[..]).into_inner());
+
+		let onion_keys = onion_utils::construct_onion_keys(&secp_ctx, &route, &session_priv).unwrap();
+		let onion_keys_2 = onion_utils::construct_onion_keys(&secp_ctx, &route, &session_priv).unwrap();
+		let onion_keys_3 = onion_utils::construct_onion_keys(&secp_ctx, &route, &session_priv).unwrap();
+		let (onion_payloads, _, htlc_cltv) = onion_utils::build_onion_payloads(&route, 1, &None, 0).unwrap();
+		let (onion_payloads_2, _, _) = onion_utils::build_onion_payloads(&route, 1, &None, 0).unwrap();
+		let (onion_payloads_3, _, _) = onion_utils::build_onion_payloads(&route, 1, &None, 0).unwrap();
+		let onion_packet = onion_utils::construct_onion_packet(onion_payloads, onion_keys, [0; 32], &payment_hash);
+		let onion_packet_2 = onion_utils::construct_onion_packet(onion_payloads_2, onion_keys_2, [0; 32], &payment_hash);
+		let onion_packet_3 = onion_utils::construct_onion_packet(onion_payloads_3, onion_keys_3, [0; 32], &payment_hash);
+
+		// The max nodes[1] can receive is its nodes[0]'s outbound liquidity
+		// minus the commit tx fees, nodes[0]'s channel reserve, and the fee
+		// spike buffer.
+		let max_can_recv = 5000000 - chans[0].local_channel_reserve_satoshis * 1000 - 2*chans[1].next_remote_commit_tx_fee_msat(1 + 1);
+
+		// Manually construct the update_add_htlc message to bypass checks in send_htlc.
+		let mut msg = UpdateAddHTLC {
+			channel_id: chans[0].channel_id,
+			htlc_id: 0,
+			amount_msat: max_can_recv + 1,
+			payment_hash,
+			cltv_expiry: htlc_cltv,
+			onion_routing_packet: onion_packet,
+		};
+		let pending_forward_state = PendingHTLCStatus::Forward(PendingHTLCInfo{
+			routing: PendingHTLCRouting::Forward{ onion_packet: onion_packet_2, short_channel_id: chans[0].short_channel_id.unwrap() },
+			incoming_shared_secret: session_priv_raw,
+			payment_hash,
+			amt_to_forward: max_can_recv + 1,
+			outgoing_cltv_value: htlc_cltv
+		});
+		let create_onion_closure = |_chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus| {
+			Some(OnionErrorPacket{ data: vec![] })
+		};
+
+		// Assert that the HTLC was successfully added.
+		assert!(chans[1].update_add_htlc(&msg, pending_forward_state, create_onion_closure).is_ok());
+
+		// Check that the HTLC's pending status is failed.
+		match &chans[1].pending_inbound_htlcs[0].state {
+			&InboundHTLCState::RemoteAnnounced(ref state) => {
+				if let &PendingHTLCStatus::Fail(_) = state { } else { panic!() }
+			},
+			_ => panic!(),
+		}
+
+		// Check that adding an HTLC worth 1 msat less will succeed.
+		let create_onion_closure = |_chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus| {
+			Some(OnionErrorPacket{ data: vec![] })
+		};
+		chans[1].pending_inbound_htlcs = vec![];
+		let pending_forward_state = PendingHTLCStatus::Forward(PendingHTLCInfo{
+			routing: PendingHTLCRouting::Forward{ onion_packet: onion_packet_3, short_channel_id: chans[0].short_channel_id.unwrap() },
+			incoming_shared_secret: session_priv_raw,
+			payment_hash,
+			amt_to_forward: max_can_recv + 1,
+			outgoing_cltv_value: htlc_cltv
+		});
+		msg.htlc_id = 1;
+		msg.amount_msat = max_can_recv;
+		assert!(chans[1].update_add_htlc(&msg, pending_forward_state, create_onion_closure).is_ok());
+		match &chans[1].pending_inbound_htlcs[0].state {
+			&InboundHTLCState::RemoteAnnounced(ref state) => {
+				if let &PendingHTLCStatus::Forward(_) = state { } else { panic!() }
+			},
+			_ => panic!(),
+		}
+	}
+
 	#[test]
 	fn test_chan_reserve_violation_inbound_htlc_outbound_chan() {
 		let chan_cfgs = create_chan_cfgs(2);
