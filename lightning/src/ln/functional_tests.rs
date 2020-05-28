@@ -1555,7 +1555,7 @@ fn test_basic_channel_reserve() {
 }
 
 #[test]
-fn test_channel_reserve_violation_close_pending_htlc() {
+fn test_chan_reserve_violation_inbound_htlc_inbound_chan() {
 	let chanmon_cfgs = create_chanmon_cfgs(3);
 	let node_cfgs = create_node_cfgs(3, &chanmon_cfgs);
 	let node_chanmgrs = create_node_chanmgrs(3, &node_cfgs, &[None, None, None]);
@@ -1573,7 +1573,8 @@ fn test_channel_reserve_violation_close_pending_htlc() {
 		}}
 	};
 
-	let total_fee_msat = (nodes.len() - 2) as u64 * 239;
+	let feemsat = 239;
+	let total_fee_msat = (nodes.len() - 2) as u64 * feemsat;
 	let chan_stat = get_channel_value_stat!(nodes[0], chan_1.2);
 	let feerate = get_feerate!(nodes[0], chan_1.2);
 
@@ -1595,9 +1596,9 @@ fn test_channel_reserve_violation_close_pending_htlc() {
 
 	// Attempt to trigger a channel reserve violation --> payment failure.
 	let recv_value_2 = chan_stat.value_to_self_msat - amt_msat_1 - chan_stat.channel_reserve_msat - total_fee_msat - commit_tx_fee_msat(feerate, 2) + 1;
-	let (route_2, our_payment_hash_1, _) = get_route_and_payment_hash!(recv_value_2);
+	let (route_2, _, _) = get_route_and_payment_hash!(recv_value_2);
 
-	// Need to manually create update_add_htlc messages to go around the channel reserve check in send_htlc()
+	// Need to manually create the update_add_htlc message to go around the channel reserve check in send_htlc()
 	let secp_ctx = Secp256k1::new();
 	let session_priv = SecretKey::from_slice(&{
 		let mut session_key = [0; 32];
@@ -1611,7 +1612,7 @@ fn test_channel_reserve_violation_close_pending_htlc() {
 	let onion_keys = onion_utils::construct_onion_keys(&secp_ctx, &route_2.paths[0], &session_priv).unwrap();
 	let (onion_payloads, htlc_msat, htlc_cltv) = onion_utils::build_onion_payloads(&route_2.paths[0], recv_value_2, &None, cur_height).unwrap();
 	let onion_packet = onion_utils::construct_onion_packet(onion_payloads, onion_keys, [0; 32], &our_payment_hash_1);
-	let msg_1 = msgs::UpdateAddHTLC {
+	let msg = msgs::UpdateAddHTLC {
 		channel_id: chan_1.2,
 		htlc_id: 1,
 		amount_msat: htlc_msat,
@@ -1620,7 +1621,7 @@ fn test_channel_reserve_violation_close_pending_htlc() {
 		onion_routing_packet: onion_packet,
 	};
 
-	nodes[1].node.handle_update_add_htlc(&nodes[0].node.get_our_node_id(), &msg_1);
+	nodes[1].node.handle_update_add_htlc(&nodes[0].node.get_our_node_id(), &msg);
 	// Check that the payment failed and the channel is closed in response to the malicious UpdateAdd.
 	nodes[1].logger.assert_log("lightning::ln::channelmanager".to_string(), "Remote HTLC add would put them under remote reserve value".to_string(), 1);
 	assert_eq!(nodes[1].node.list_channels().len(), 1);
@@ -1635,7 +1636,7 @@ fn commit_tx_fee_msat(feerate: u64, num_htlcs: u64) -> u64 {
 }
 
 #[test]
-fn channel_reserve_test() {
+fn test_channel_reserve_holding_cell_htlcs() {
 	let chanmon_cfgs = create_chanmon_cfgs(3);
 	let node_cfgs = create_node_cfgs(3, &chanmon_cfgs);
 	let node_chanmgrs = create_node_chanmgrs(3, &node_cfgs, &[None, None, None]);
@@ -1670,7 +1671,7 @@ fn channel_reserve_test() {
 	}
 
 	let feemsat = 239; // somehow we know?
-	let total_fee_msat = (nodes.len() - 2) as u64 * 239;
+	let total_fee_msat = (nodes.len() - 2) as u64 * feemsat;
 	let feerate = get_feerate!(nodes[0], chan_1.2);
 
 	let recv_value_0 = stat01.their_max_htlc_value_in_flight_msat - total_fee_msat;
@@ -1692,7 +1693,9 @@ fn channel_reserve_test() {
 		// 3 for the 3 HTLCs that will be sent, 2* and +1 for the fee spike reserve.
 		// Also, ensure that each payment has enough to be over the dust limit to
 		// ensure it'll be included in each commit tx fee calculation.
-		if stat01.value_to_self_msat < stat01.channel_reserve_msat + 2*commit_tx_fee_msat(feerate, 3 + 1) + 3 * (stat01.their_dust_limit_msat + 1000) + amt_msat {
+		let commit_tx_fee_all_htlcs = 2*commit_tx_fee_msat(feerate, 3 + 1);
+		let ensure_htlc_amounts_above_dust_buffer = 3 * (stat01.their_dust_limit_msat + 1000);
+		if stat01.value_to_self_msat < stat01.channel_reserve_msat + commit_tx_fee_all_htlcs + ensure_htlc_amounts_above_dust_buffer + amt_msat {
 			break;
 		}
 		send_payment(&nodes[0], &vec![&nodes[1], &nodes[2]][..], recv_value_0, recv_value_0);
@@ -1713,6 +1716,15 @@ fn channel_reserve_test() {
 
 	// adding pending output.
 	// 2* and +1 HTLCs on the commit tx fee for the fee spike reserve.
+	// The reason we're dividing by two here is as follows: the dividend is the total outbound liquidity
+	// after fees, the channel reserve, and the fee spike buffer are removed. We eventually want to
+	// divide this quantity into 3 portions, that will each be sent in an HTLC. This allows us
+	// to test channel channel reserve policy at the edges of what amount is sendable, i.e.
+	// cases where 1 msat over X amount will cause a payment failure, but anything less than
+	// that can be sent successfully. So, dividing by two is a somewhat arbitrary way of getting
+	// the amount of the first of these aforementioned 3 payments. The reason we split into 3 payments
+	// is to test the behavior of the holding cell with respect to channel reserve and commit tx fee
+	// policy.
 	let recv_value_1 = (stat01.value_to_self_msat - stat01.channel_reserve_msat - total_fee_msat - 2*commit_tx_fee_msat(feerate, 2 + 1))/2;
 	let amt_msat_1 = recv_value_1 + total_fee_msat;
 
