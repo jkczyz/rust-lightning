@@ -4432,10 +4432,10 @@ mod tests {
 	use bitcoin::hashes::hex::FromHex;
 	use hex;
 	use ln::channelmanager::{HTLCSource, PaymentPreimage, PaymentHash, PendingHTLCStatus, PendingHTLCInfo, PendingHTLCRouting};
-	use ln::channel::{Channel,ChannelKeys,InboundHTLCOutput,OutboundHTLCOutput,InboundHTLCState,OutboundHTLCState,HTLCOutputInCommitment,TxCreationKeys};
+	use ln::channel::{Channel,ChannelKeys,InboundHTLCOutput,OutboundHTLCOutput,InboundHTLCState,OutboundHTLCState,HTLCOutputInCommitment,TxCreationKeys, ChannelError};
 	use ln::channel::MAX_FUNDING_SATOSHIS;
 	use ln::features::{InitFeatures, NodeFeatures};
-	use ln::msgs::{OptionalField, DataLossProtect, UpdateAddHTLC, OnionErrorPacket};
+	use ln::msgs::{OptionalField, DataLossProtect, UpdateAddHTLC, OnionErrorPacket, OnionPacket};
 	use ln::{chan_utils, onion_utils};
 	use ln::chan_utils::{LocalCommitmentTransaction, ChannelPublicKeys};
 	use ln::features::ChannelFeatures;
@@ -4601,6 +4601,32 @@ mod tests {
 				assert_eq!(your_last_per_commitment_secret, [0; 32]);
 			},
 			_ => panic!()
+		}
+	}
+
+	#[test]
+	fn test_chan_reserve_violation_outbound_htlc_inbound_chan() {
+		let chan_cfgs = create_chan_cfgs(2);
+		let mut chans = create_channels(&chan_cfgs, 100000, 95000000);
+
+		// update_add_htlc would prevent us from letting their balance get
+		// this low, so we do it manually.
+		let min_remote_balance = chans[0].local_channel_reserve_satoshis + chans[1].next_remote_commit_tx_fee_msat(1);
+		chans[1].value_to_self_msat = 95000000 + (5000000 - min_remote_balance) + 1;
+
+		let dummy_htlc_src = HTLCSource::OutboundRoute{
+			path: vec![], session_priv: SecretKey::from_slice(&[7; 32]).unwrap(), first_hop_htlc_msat: 0
+		};
+		let dummy_onion_packet = OnionPacket{
+			version: 0,
+			public_key: Ok(chans[0].their_node_id),
+			hop_data: [0; 20*65],
+			hmac: [0;32],
+		};
+
+		match chans[1].send_htlc(1, PaymentHash([0;32]), 0, dummy_htlc_src, dummy_onion_packet) {
+			Err(ChannelError::Ignore(msg)) => assert_eq!(msg, "Cannot send value that would put them under remote channel reserve value"),
+			_ => panic!(),
 		}
 	}
 
