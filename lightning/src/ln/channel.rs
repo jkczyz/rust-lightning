@@ -1733,8 +1733,18 @@ impl<ChanSigner: ChannelKeys> Channel<ChanSigner> {
 		self.commit_tx_fee_msat(their_acked_htlcs + addl_htlcs)
 	}
 
-  pub fn update_add_htlc<F>(&mut self, msg: &msgs::UpdateAddHTLC, mut pending_forward_state: PendingHTLCStatus, create_onion_error_packet: F) -> Result<(), ChannelError>
-  where F: for<'a, 'b> Fn(&'a Self, &'b PendingHTLCStatus) -> Option<msgs::OnionErrorPacket> {
+  pub fn update_add_htlc<F>(&mut self, msg: &msgs::UpdateAddHTLC, mut pending_forward_state: PendingHTLCStatus, create_pending_htlc_status: F) -> Result<(), ChannelError>
+  where F: for<'a, 'b> Fn(&'a Self, &'b PendingHTLCStatus, u16) -> Option<PendingHTLCStatus> {
+		if !self.is_usable() {
+			// TODO: Note that |20 is defined as "channel FROM the processing
+			// node has been disabled" (emphasis mine), which seems to imply
+			// that we can't return |20 for an inbound channel being disabled.
+			// This probably needs a spec update but should definitely be
+			// allowed.
+			if let Some(new_state) = create_pending_htlc_status(self, &pending_forward_state, 0x1000|20) {
+				pending_forward_state = new_state;
+			}
+		}
 		if (self.channel_state & (ChannelState::ChannelFunded as u32 | ChannelState::RemoteShutdownSent as u32)) != (ChannelState::ChannelFunded as u32) {
 			return Err(ChannelError::Close("Got add HTLC message when channel was not in an operational state"));
 		}
@@ -1807,13 +1817,8 @@ impl<ChanSigner: ChannelKeys> Channel<ChanSigner> {
 			// but should help protect us from stuck channels).
 			let remote_fee_cost_incl_stuck_buffer_msat = 2 * self.next_remote_commit_tx_fee_msat(1 + 1);
 			if pending_remote_value_msat - msg.amount_msat - chan_reserve_msat < remote_fee_cost_incl_stuck_buffer_msat {
-        let onion_error_packet = create_onion_error_packet(self, &pending_forward_state);
-        if let Some(reason) = onion_error_packet {
-					pending_forward_state = PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(msgs::UpdateFailHTLC {
-						channel_id: msg.channel_id,
-						htlc_id: msg.htlc_id,
-						reason,
-					}));
+				if let Some(new_state) = create_pending_htlc_status(self, &pending_forward_state, 0x1000|7) {
+					pending_forward_state = new_state;
 				}
 			}
 		} else {
@@ -4431,11 +4436,11 @@ mod tests {
 	use bitcoin::network::constants::Network;
 	use bitcoin::hashes::hex::FromHex;
 	use hex;
-	use ln::channelmanager::{HTLCSource, PaymentPreimage, PaymentHash, PendingHTLCStatus, PendingHTLCInfo, PendingHTLCRouting};
+	use ln::channelmanager::{HTLCSource, PaymentPreimage, PaymentHash, PendingHTLCStatus, PendingHTLCInfo, PendingHTLCRouting, HTLCFailureMsg};
 	use ln::channel::{Channel,ChannelKeys,InboundHTLCOutput,OutboundHTLCOutput,InboundHTLCState,OutboundHTLCState,HTLCOutputInCommitment,TxCreationKeys, ChannelError};
 	use ln::channel::MAX_FUNDING_SATOSHIS;
 	use ln::features::{InitFeatures, NodeFeatures};
-	use ln::msgs::{OptionalField, DataLossProtect, UpdateAddHTLC, OnionErrorPacket, OnionPacket};
+	use ln::msgs::{OptionalField, DataLossProtect, UpdateAddHTLC, UpdateFailHTLC, OnionErrorPacket, OnionPacket};
 	use ln::{chan_utils, onion_utils};
 	use ln::chan_utils::{LocalCommitmentTransaction, ChannelPublicKeys};
 	use ln::features::ChannelFeatures;
@@ -4691,12 +4696,18 @@ mod tests {
 			amt_to_forward: max_can_recv + 1,
 			outgoing_cltv_value: htlc_cltv
 		});
-		let create_onion_closure = |_chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus| {
-			Some(OnionErrorPacket{ data: vec![] })
+		let create_pending_htlc_status = |chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus, _error_code: u16| {
+			Some(PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(
+				UpdateFailHTLC{
+					channel_id: chan.channel_id,
+					htlc_id: 0,
+					reason: OnionErrorPacket { data: vec![] },
+				}
+			)))
 		};
 
 		// Assert that the HTLC was successfully added.
-		assert!(chans[1].update_add_htlc(&msg, pending_forward_state, create_onion_closure).is_ok());
+		assert!(chans[1].update_add_htlc(&msg, pending_forward_state, &create_pending_htlc_status).is_ok());
 
 		// Check that the HTLC's pending status is failed.
 		match &chans[1].pending_inbound_htlcs[0].state {
@@ -4707,8 +4718,14 @@ mod tests {
 		}
 
 		// Check that adding an HTLC worth 1 msat less will succeed.
-		let create_onion_closure = |_chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus| {
-			Some(OnionErrorPacket{ data: vec![] })
+		let create_pending_htlc_status = |chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus, _error_code: u16| {
+			Some(PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(
+				UpdateFailHTLC{
+					channel_id: chan.channel_id,
+					htlc_id: 0,
+					reason: OnionErrorPacket { data: vec![] },
+				}
+			)))
 		};
 		chans[1].pending_inbound_htlcs = vec![];
 		let pending_forward_state = PendingHTLCStatus::Forward(PendingHTLCInfo{
@@ -4720,7 +4737,7 @@ mod tests {
 		});
 		msg.htlc_id = 1;
 		msg.amount_msat = max_can_recv;
-		assert!(chans[1].update_add_htlc(&msg, pending_forward_state, create_onion_closure).is_ok());
+		assert!(chans[1].update_add_htlc(&msg, pending_forward_state, &create_pending_htlc_status).is_ok());
 		match &chans[1].pending_inbound_htlcs[0].state {
 			&InboundHTLCState::RemoteAnnounced(ref state) => {
 				if let &PendingHTLCStatus::Forward(_) = state { } else { panic!() }
@@ -4784,11 +4801,11 @@ mod tests {
 			outgoing_cltv_value: htlc_cltv
 		});
 
-		let create_onion_closure = |_chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus| {
+		let create_pending_htlc_status = |_chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus, _error_code: u16| {
 			None
 		};
 
-		match chans[0].update_add_htlc(&msg, pending_forward_state, create_onion_closure) {
+		match chans[0].update_add_htlc(&msg, pending_forward_state, &create_pending_htlc_status) {
 			Err(ChannelError::Ignore(msg)) => assert_eq!(msg, "Cannot receive value that would put us under local channel reserve value"),
 			_ => panic!()
 		}
