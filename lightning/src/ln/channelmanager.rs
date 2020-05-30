@@ -2504,12 +2504,12 @@ impl<ChanSigner: ChannelKeys, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> 
 					return Err(MsgHandleErrInternal::send_err_msg_no_close("Got a message for a channel from the wrong node!", msg.channel_id));
 				}
 
-				let create_pending_htlc_status = |chan: &Channel<ChanSigner>, pending_forward_info: &PendingHTLCStatus, error_code: u16| {
+				let create_pending_htlc_status = |chan: &Channel<ChanSigner>, pending_forward_info: PendingHTLCStatus, error_code: u16| {
 					// If the update_add is completely bogus, the call will Err and we will close,
 					// but if we've sent a shutdown and they haven't acknowledged it yet, we just
 					// want to reject the new HTLC and fail it backwards instead of forwarding.
 					match pending_forward_info {
-						&PendingHTLCStatus::Forward(PendingHTLCInfo { ref incoming_shared_secret, .. }) => {
+						PendingHTLCStatus::Forward(PendingHTLCInfo { ref incoming_shared_secret, .. }) => {
 							let mut reason = onion_utils::build_first_hop_failure_packet(incoming_shared_secret, 0x4000|10, &[]);
 							// The only case where we'd be unable to successfully get a channel
 							// update here is if the channel isn't in the fully-funded
@@ -2530,9 +2530,9 @@ impl<ChanSigner: ChannelKeys, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> 
 								htlc_id: msg.htlc_id,
 								reason
 							};
-							Some(PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(msg)))
+							PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(msg))
 						},
-						_ => None
+						_ => pending_forward_info
 					}
 				};
         try_chan_entry!(self, chan.get_mut().update_add_htlc(&msg, pending_forward_info, create_pending_htlc_status), channel_state, chan);

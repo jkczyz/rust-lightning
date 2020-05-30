@@ -1734,16 +1734,14 @@ impl<ChanSigner: ChannelKeys> Channel<ChanSigner> {
 	}
 
   pub fn update_add_htlc<F>(&mut self, msg: &msgs::UpdateAddHTLC, mut pending_forward_state: PendingHTLCStatus, create_pending_htlc_status: F) -> Result<(), ChannelError>
-  where F: for<'a, 'b> Fn(&'a Self, &'b PendingHTLCStatus, u16) -> Option<PendingHTLCStatus> {
+  where F: for<'a> Fn(&'a Self, PendingHTLCStatus, u16) -> PendingHTLCStatus {
 		if !self.is_usable() {
 			// TODO: Note that |20 is defined as "channel FROM the processing
 			// node has been disabled" (emphasis mine), which seems to imply
 			// that we can't return |20 for an inbound channel being disabled.
 			// This probably needs a spec update but should definitely be
 			// allowed.
-			if let Some(new_state) = create_pending_htlc_status(self, &pending_forward_state, 0x1000|20) {
-				pending_forward_state = new_state;
-			}
+			pending_forward_state = create_pending_htlc_status(self, pending_forward_state, 0x1000|20);
 		}
 		if (self.channel_state & (ChannelState::ChannelFunded as u32 | ChannelState::RemoteShutdownSent as u32)) != (ChannelState::ChannelFunded as u32) {
 			return Err(ChannelError::Close("Got add HTLC message when channel was not in an operational state"));
@@ -1817,9 +1815,7 @@ impl<ChanSigner: ChannelKeys> Channel<ChanSigner> {
 			// but should help protect us from stuck channels).
 			let remote_fee_cost_incl_stuck_buffer_msat = 2 * self.next_remote_commit_tx_fee_msat(1 + 1);
 			if pending_remote_value_msat - msg.amount_msat - chan_reserve_msat < remote_fee_cost_incl_stuck_buffer_msat {
-				if let Some(new_state) = create_pending_htlc_status(self, &pending_forward_state, 0x1000|7) {
-					pending_forward_state = new_state;
-				}
+				pending_forward_state = create_pending_htlc_status(self, pending_forward_state, 0x1000|7);
 			}
 		} else {
 			// Check that they won't violate our local required channel reserve by adding this HTLC.
@@ -4696,14 +4692,14 @@ mod tests {
 			amt_to_forward: max_can_recv + 1,
 			outgoing_cltv_value: htlc_cltv
 		});
-		let create_pending_htlc_status = |chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus, _error_code: u16| {
-			Some(PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(
+		let create_pending_htlc_status = |chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: PendingHTLCStatus, _error_code: u16| {
+			PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(
 				UpdateFailHTLC{
 					channel_id: chan.channel_id,
 					htlc_id: 0,
 					reason: OnionErrorPacket { data: vec![] },
 				}
-			)))
+			))
 		};
 
 		// Assert that the HTLC was successfully added.
@@ -4718,14 +4714,14 @@ mod tests {
 		}
 
 		// Check that adding an HTLC worth 1 msat less will succeed.
-		let create_pending_htlc_status = |chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus, _error_code: u16| {
-			Some(PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(
+		let create_pending_htlc_status = |chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: PendingHTLCStatus, _error_code: u16| {
+			PendingHTLCStatus::Fail(HTLCFailureMsg::Relay(
 				UpdateFailHTLC{
 					channel_id: chan.channel_id,
 					htlc_id: 0,
 					reason: OnionErrorPacket { data: vec![] },
 				}
-			)))
+			))
 		};
 		chans[1].pending_inbound_htlcs = vec![];
 		let pending_forward_state = PendingHTLCStatus::Forward(PendingHTLCInfo{
@@ -4801,8 +4797,8 @@ mod tests {
 			outgoing_cltv_value: htlc_cltv
 		});
 
-		let create_pending_htlc_status = |_chan: &Channel<EnforcingChannelKeys>, _pending_forward_info: &PendingHTLCStatus, _error_code: u16| {
-			None
+		let create_pending_htlc_status = |_chan: &Channel<EnforcingChannelKeys>, pending_forward_info: PendingHTLCStatus, _error_code: u16| {
+			pending_forward_info
 		};
 
 		match chans[0].update_add_htlc(&msg, pending_forward_state, &create_pending_htlc_status) {
