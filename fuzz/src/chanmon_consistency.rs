@@ -18,7 +18,7 @@
 //! send-side handling is correct, other peers. We consider it a failure if any action results in a
 //! channel being force-closed.
 
-use bitcoin::blockdata::block::{Block, BlockHeader};
+use bitcoin::blockdata::block::BlockHeader;
 use bitcoin::blockdata::transaction::{Transaction, TxOut};
 use bitcoin::blockdata::script::{Builder, Script};
 use bitcoin::blockdata::opcodes;
@@ -307,17 +307,12 @@ pub fn do_test<Out: test_logger::Output>(data: &[u8], out: Out) {
 
 	macro_rules! confirm_txn {
 		($node: expr) => { {
-			let mut block = Block {
-				header: BlockHeader { version: 0x20000000, prev_blockhash: Default::default(), merkle_root: Default::default(), time: 42, bits: 42, nonce: 42 },
-				txdata: channel_txn.clone(),
-			};
-			$node.block_connected(&block, 1);
+			let mut header = BlockHeader { version: 0x20000000, prev_blockhash: Default::default(), merkle_root: Default::default(), time: 42, bits: 42, nonce: 42 };
+			let txdata: Vec<_> = channel_txn.iter().enumerate().map(|(i, tx)| (i + 1, tx)).collect();
+			$node.block_connected(&header, &txdata, 1);
 			for i in 2..100 {
-				block = Block {
-					header: BlockHeader { version: 0x20000000, prev_blockhash: block.block_hash(), merkle_root: Default::default(), time: 42, bits: 42, nonce: 42 },
-					txdata: vec![],
-				};
-				$node.block_connected(&block, i);
+				header = BlockHeader { version: 0x20000000, prev_blockhash: header.block_hash(), merkle_root: Default::default(), time: 42, bits: 42, nonce: 42 };
+				$node.block_connected(&header, &[], i);
 			}
 		} }
 	}
