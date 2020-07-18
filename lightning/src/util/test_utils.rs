@@ -402,7 +402,7 @@ impl TestChainSource {
 	pub fn new(network: Network) -> Self {
 		let script_pubkey = Builder::new().push_opcode(opcodes::OP_TRUE).into_script();
 		Self {
-			genesis_hash: genesis_block(network).bitcoin_hash(),
+			genesis_hash: genesis_block(network).block_hash(),
 			utxo_ret: Mutex::new(Ok(TxOut { value: u64::max_value(), script_pubkey })),
 		}
 	}
