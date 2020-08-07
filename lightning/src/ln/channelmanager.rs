@@ -37,9 +37,9 @@ use bitcoin::secp256k1;
 use chain;
 use chain::Watch;
 use chain::chaininterface::{BroadcasterInterface, FeeEstimator};
+use chain::channelmonitor::{ChannelMonitor, ChannelMonitorUpdate, ChannelMonitorUpdateErr, HTLC_FAIL_BACK_BUFFER, CLTV_CLAIM_BUFFER, LATENCY_GRACE_PERIOD_BLOCKS, ANTI_REORG_DELAY, MonitorEvent};
 use chain::transaction::OutPoint;
 use ln::channel::{Channel, ChannelError};
-use ln::channelmonitor::{ChannelMonitor, ChannelMonitorUpdate, ChannelMonitorUpdateErr, HTLC_FAIL_BACK_BUFFER, CLTV_CLAIM_BUFFER, LATENCY_GRACE_PERIOD_BLOCKS, ANTI_REORG_DELAY, MonitorEvent};
 use ln::features::{InitFeatures, NodeFeatures};
 use routing::router::{Route, RouteHop};
 use ln::msgs;
@@ -130,7 +130,7 @@ pub(super) enum HTLCForwardInfo {
 
 /// Tracks the inbound corresponding to an outbound HTLC
 #[derive(Clone, PartialEq)]
-pub(super) struct HTLCPreviousHopData {
+pub(crate) struct HTLCPreviousHopData {
 	short_channel_id: u64,
 	htlc_id: u64,
 	incoming_packet_shared_secret: [u8; 32],
@@ -149,7 +149,7 @@ struct ClaimableHTLC {
 
 /// Tracks the inbound corresponding to an outbound HTLC
 #[derive(Clone, PartialEq)]
-pub(super) enum HTLCSource {
+pub(crate) enum HTLCSource {
 	PreviousHopData(HTLCPreviousHopData),
 	OutboundRoute {
 		path: Vec<RouteHop>,
@@ -3063,7 +3063,7 @@ impl<ChanSigner: ChannelKeys, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> 
 	///
 	/// Unlike [`ChannelMonitor::block_connected`], this function does not require any rescan logic.
 	///
-	/// [`ChannelMonitor::block_connected`]: struct.ChannelMonitor.html#method.block_connected
+	/// [`ChannelMonitor::block_connected`]: ../../chain/channelmonitor/struct.ChannelMonitor.html#method.block_connected
 	pub fn block_connected(&self, header: &BlockHeader, txdata: &[(usize, &Transaction)], height: u32) {
 		let header_hash = header.block_hash();
 		log_trace!(self.logger, "Block {} at height {} connected", header_hash, height);
