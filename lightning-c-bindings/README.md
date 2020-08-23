@@ -123,6 +123,16 @@ C++, all functions return the C type. Thus, you must bind returned values to the
 (replacing LDKX with LDK::X) to ensure the destructor is properly run. A demonstration of such usage
 is available at [demo.cpp](demo.cpp).
 
+Gotchas
+=======
+
+There are a few gotchas around future changes to Rust-Lightning which the bindings may not support.
+These include:
+ * Any trait method which returns a reference to a struct or inner variable cannot be called in
+   parallel. This is due to the fact that such functions are mapped into a function which is called
+   to get the return value, but then the return value is stored locally in the trait and a
+   reference to that copy is returned. Such functions have comments describing the potential race
+   conditions.
+
 **It is highly recommended that you test any code which relies on the C (or C++) bindings in
 valgrind, MemorySanitizer, or other similar tools to ensure correctness.**
-
