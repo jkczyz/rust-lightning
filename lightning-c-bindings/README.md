@@ -94,6 +94,12 @@ All of the Rust-Lightning types are mapped into C equivalents which take a few f
    MUST_USE_RES LDKCResult_NoneAPIErrorZ ChannelManager_create_channel(const LDKChannelManager *this_arg, ..., LDKUserConfig override_config);
    ```
 
+ * Various containers (Tuples, Vecs, Results, etc) are mapped into C structs of the form
+   LDKCContainerType_ContainerElementsZ. Inner fields are often pointers, and in the case of
+   primitive types, these may be allocated in C using the system allocator. See [the Rust docs on
+   your platform's default System allocator](https://doc.rust-lang.org/std/alloc/struct.System.html)
+   for which allocator you must use.
+
 As the bindings are auto-generated, the best resource for documentation on them is the native Rust
 docs available via `cargo doc` or [docs.rs/lightning](https://docs.rs/lightning).
 
