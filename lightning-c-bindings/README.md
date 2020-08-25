@@ -12,7 +12,8 @@ LDK C Bindings
 
 The C bindings available at include/lightning.h require inclusion of include/rust_types.h first.
 
-All of the Rust-Lightning types are mapped into C equivalents which take a few forms, namely:
+All of the Rust-Lightning types are mapped into C equivalents which take a few forms, with the C
+type getting an `LDK` prefix to their native Rust type names.
 
  * Structs are mapped into a simple wrapper containing a pointer to the native Rust-Lightning
    object and a flag to indicate whether the object is owned or only a reference. Such mappings
@@ -36,12 +37,15 @@ All of the Rust-Lightning types are mapped into C equivalents which take a few f
    } LDKChannelManager;
    ```
 
- * Traits are mapped into a concrete struct containing a void pointer and a jump table listing the
-   functions which the trait must implement. The void pointer may be set to any value and is never
-   interpreted (or dereferenced) by the bindings logic in any way. It is passed as the first
-   argument to all function calls in the trait. You may wish to use it as a pointer to your own
-   internal data structure, though it may also occasionally make sense to e.g. cast a file
+ * Traits are mapped into a concrete struct containing a void pointer (named `this_arg` and a jump
+   table listing the functions which the trait must implement. The void pointer may be set to any
+   value and is never interpreted (or dereferenced) by the bindings logic in any way. It is passed
+   as the first argument to all function calls in the trait. You may wish to use it as a pointer to
+   your own internal data structure, though it may also occasionally make sense to e.g. cast a file
    descriptor into a void pointer and use it to track a socket.
+
+   This should remind you of a C++ vtable, only written out by hand and with the class only
+   containing a pointer, instead of the regular class data.
 
    Each trait additionally contains a `free` and `clone` function pointer, which may be NULL. The
    `free` function is passed the void pointer when the object is `Drop`ed in Rust. The `clone`
@@ -76,12 +80,54 @@ All of the Rust-Lightning types are mapped into C equivalents which take a few f
    which must never appear in an enum when accessed by Rust code). The `Sentinel` tag is used by
    the C++ wrapper classes to allow moving the ownership of an enum while invalidating the old copy.
 
+   For example, the unitary enum `LDKChannelMonitorUpdateErr` is mapped as follows:
+   ```
+   typedef enum LDKChannelMonitorUpdateErr {
+      /** .. */
+      LDKChannelMonitorUpdateErr_TemporaryFailure,
+      /** .. */
+      LDKChannelMonitorUpdateErr_PermanentFailure,
+      /** .. */
+      LDKChannelMonitorUpdateErr_Sentinel,
+   } LDKChannelMonitorUpdateErr;
+   ```
+
+   and the non-unitary enum LDKErrorAction is mapped as follows:
+   ```
+   typedef enum LDKErrorAction_Tag {
+      /** .. */
+      LDKErrorAction_DisconnectPeer,
+      /** .. */
+      LDKErrorAction_IgnoreError,
+      /** .. */
+      LDKErrorAction_SendErrorMessage,
+      /** .. */
+      LDKErrorAction_Sentinel,
+   } LDKErrorAction_Tag;
+
+   typedef struct LDKErrorAction_LDKDisconnectPeer_Body {
+      LDKErrorMessage msg;
+   } LDKErrorAction_LDKDisconnectPeer_Body;
+
+   typedef struct LDKErrorAction_LDKSendErrorMessage_Body {
+      LDKErrorMessage msg;
+   } LDKErrorAction_LDKSendErrorMessage_Body;
+
+   typedef struct LDKErrorAction {
+      LDKErrorAction_Tag tag;
+      union {
+         LDKErrorAction_LDKDisconnectPeer_Body disconnect_peer;
+         LDKErrorAction_LDKSendErrorMessage_Body send_error_message;
+      };
+   } LDKErrorAction;
+   ```
+
  * Struct member functions are mapped as `Struct_function_name` and take a reference to the mapped
    struct as their first argument. Free-standing functions are mapped simply as `function_name` and
    take the relevant mapped type arguments.
 
    Functions may return a reference to an underlying Rust object with a mapped struct or an owned
-   Rust object with the same. The mapped struct contains a flag to indicate if the poitned-to Rust
+   Rust object with the same. The mapped struct contains a flag to indicate if the pointed-to Rust
    object is owned or only a reference, and the object's corresponding free function will Do The
    Right Thing based on the flag. In order to determine the expected return type, you should
    reference the Rust documentation for the function.
@@ -107,9 +153,9 @@ The memory model is largely the Rust memory model and not a native C-like memory
 function parameters are largely only ever passed by reference or by move, with pass-by-copy
 semantics only applying to primitive types. However, because the underlying types are largely
 pointers, the same function signature may imply two different memory ownership semantics. Thus, you
-MUST read the Rust documentation while using the C bindings. For functions which ownership is moved
-to Rust, the corresponding `X_fre`e function MUST NOT be called on the object, whereas for all other
-objects, `X_free` MUST be used to free resources.
+MUST read the Rust documentation while using the C bindings. For functions which take arguments
+where ownership is moved to the function scope, the corresponding `X_free` function MUST NOT be
+called on the object, whereas for all other objects, `X_free` MUST be used to free resources.
 
 LDK C++ Bindings
 ================
