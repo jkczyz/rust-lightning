@@ -95,7 +95,7 @@ All of the Rust-Lightning types are mapped into C equivalents which take a few f
    ```
 
  * Various containers (Tuples, Vecs, Results, etc) are mapped into C structs of the form
-   LDKCContainerType_ContainerElementsZ. Inner fields are often pointers, and in the case of
+   `LDKCContainerType_ContainerElementsZ`. Inner fields are often pointers, and in the case of
    primitive types, these may be allocated in C using the system allocator. See [the Rust docs on
    your platform's default System allocator](https://doc.rust-lang.org/std/alloc/struct.System.html)
    for which allocator you must use.
@@ -126,8 +126,8 @@ C++-isms to make memory model correctness easier to achieve. They provide:
 In general, you should prefer to use the C++ bindings if possible, as they make memory leaks and
 other violations somewhat easier to avoid. Note that, because the C functions are not redefined in
 C++, all functions return the C type. Thus, you must bind returned values to the equivalent C++ type
-(replacing LDKX with LDK::X) to ensure the destructor is properly run. A demonstration of such usage
-is available at [demo.cpp](demo.cpp).
+(replacing `LDKX` with `LDK::X`) to ensure the destructor is properly run. A demonstration of such
+usage is available at [demo.cpp](demo.cpp).
 
 Gotchas
 =======
@@ -135,10 +135,9 @@ Gotchas
 There are a few gotchas around future changes to Rust-Lightning which the bindings may not support.
 These include:
  * Any trait method which returns a reference to a struct or inner variable cannot be called in
-   parallel. This is due to the fact that such functions are mapped into a function which is called
-   to get the return value, but then the return value is stored locally in the trait and a
-   reference to that copy is returned. Such functions have comments describing the potential race
-   conditions.
+   parallel. This is because such functions always return a local variable stored inside the trait,
+   with a call through a function pointer to get the local variable set correctly. Such functions
+   have comments describing the potential race conditions.
 
 **It is highly recommended that you test any code which relies on the C (or C++) bindings in
 valgrind, MemorySanitizer, or other similar tools to ensure correctness.**
