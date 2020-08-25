@@ -43,3 +43,6 @@ opt-level = 1
 name = "lightning_fuzz"
 path = "src/lib.rs"
 crate-type = ["rlib", "dylib", "staticlib"]
+
+[patch.crates-io]
+bitcoin = { git = "https://github.com/TheBlueMatt/rust-bitcoin" }
