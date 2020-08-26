@@ -408,6 +408,15 @@ fn writeln_opaque<W: std::io::Write>(w: &mut W, ident: &syn::Ident, struct_name:
 	writeln!(w, "/// Used only if an object of this type is returned as a trait impl by a method").unwrap();
 	writeln!(w, "extern \"C\" fn {}_free_void(this_ptr: *mut c_void) {{", struct_name).unwrap();
 	writeln!(w, "\tunsafe {{ let _ = Box::from_raw(this_ptr as *mut native{}); }}\n}}", struct_name).unwrap();
+	writeln!(w, "#[allow(unused)]").unwrap();
+	writeln!(w, "/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy").unwrap();
+	writeln!(w, "impl {} {{", struct_name).unwrap();
+	writeln!(w, "\tpub(crate) fn take_ptr(mut self) -> *mut native{} {{", struct_name).unwrap();
+	writeln!(w, "\t\tassert!(!self._underlying_ref);").unwrap();
+	writeln!(w, "\t\tlet ret = self.inner;").unwrap();
+	writeln!(w, "\t\tself.inner = std::ptr::null_mut();").unwrap();
+	writeln!(w, "\t\tret").unwrap();
+	writeln!(w, "\t}}\n}}").unwrap();
 
 	'attr_loop: for attr in attrs.iter() {
 		let tokens_clone = attr.tokens.clone();
