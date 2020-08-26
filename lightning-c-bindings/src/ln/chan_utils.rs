@@ -47,6 +47,16 @@ pub extern "C" fn TxCreationKeys_free(this_ptr: TxCreationKeys) { }
 extern "C" fn TxCreationKeys_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeTxCreationKeys); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl TxCreationKeys {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeTxCreationKeys {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 impl Clone for TxCreationKeys {
 	fn clone(&self) -> Self {
 		Self {
@@ -171,11 +181,21 @@ pub extern "C" fn PreCalculatedTxCreationKeys_free(this_ptr: PreCalculatedTxCrea
 extern "C" fn PreCalculatedTxCreationKeys_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativePreCalculatedTxCreationKeys); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl PreCalculatedTxCreationKeys {
+	pub(crate) fn take_ptr(mut self) -> *mut nativePreCalculatedTxCreationKeys {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// Create a new PreCalculatedTxCreationKeys from TxCreationKeys
 #[must_use]
 #[no_mangle]
 pub extern "C" fn PreCalculatedTxCreationKeys_new(mut keys: crate::ln::chan_utils::TxCreationKeys) -> PreCalculatedTxCreationKeys {
-	let mut ret = lightning::ln::chan_utils::PreCalculatedTxCreationKeys::new(*unsafe { Box::from_raw(keys.inner.take_ptr()) });
+	let mut ret = lightning::ln::chan_utils::PreCalculatedTxCreationKeys::new(*unsafe { Box::from_raw(keys.take_ptr()) });
 	PreCalculatedTxCreationKeys { inner: Box::into_raw(Box::new(ret)), _underlying_ref: false }
 }
 
@@ -223,6 +243,16 @@ pub extern "C" fn ChannelPublicKeys_free(this_ptr: ChannelPublicKeys) { }
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn ChannelPublicKeys_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeChannelPublicKeys); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl ChannelPublicKeys {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeChannelPublicKeys {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }
 impl Clone for ChannelPublicKeys {
 	fn clone(&self) -> Self {
@@ -379,6 +409,16 @@ pub extern "C" fn HTLCOutputInCommitment_free(this_ptr: HTLCOutputInCommitment) 
 extern "C" fn HTLCOutputInCommitment_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeHTLCOutputInCommitment); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl HTLCOutputInCommitment {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeHTLCOutputInCommitment {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 impl Clone for HTLCOutputInCommitment {
 	fn clone(&self) -> Self {
 		Self {
@@ -510,6 +550,16 @@ pub extern "C" fn LocalCommitmentTransaction_free(this_ptr: LocalCommitmentTrans
 extern "C" fn LocalCommitmentTransaction_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeLocalCommitmentTransaction); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl LocalCommitmentTransaction {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeLocalCommitmentTransaction {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 impl Clone for LocalCommitmentTransaction {
 	fn clone(&self) -> Self {
 		Self {
@@ -569,7 +619,7 @@ pub extern "C" fn LocalCommitmentTransaction_set_feerate_per_kw(this_ptr: &mut L
 /// those for which transaction_output_index.is_some().
 #[no_mangle]
 pub extern "C" fn LocalCommitmentTransaction_set_per_htlc(this_ptr: &mut LocalCommitmentTransaction, mut val: crate::c_types::derived::CVec_C2Tuple_HTLCOutputInCommitmentSignatureZZ) {
-	let mut local_val = Vec::new(); for mut item in val.into_rust().drain(..) { local_val.push( { let (mut orig_val_0_0, mut orig_val_0_1) = item.to_rust(); let mut local_orig_val_0_1 = if orig_val_0_1.is_null() { None } else { Some( { orig_val_0_1.into_rust() }) }; let mut local_val_0 = (*unsafe { Box::from_raw(orig_val_0_0.inner.take_ptr()) }, local_orig_val_0_1); local_val_0 }); };
+	let mut local_val = Vec::new(); for mut item in val.into_rust().drain(..) { local_val.push( { let (mut orig_val_0_0, mut orig_val_0_1) = item.to_rust(); let mut local_orig_val_0_1 = if orig_val_0_1.is_null() { None } else { Some( { orig_val_0_1.into_rust() }) }; let mut local_val_0 = (*unsafe { Box::from_raw(orig_val_0_0.take_ptr()) }, local_orig_val_0_1); local_val_0 }); };
 	unsafe { &mut *this_ptr.inner }.per_htlc = local_val;
 }
 /// Generate a new LocalCommitmentTransaction based on a raw commitment transaction,
@@ -580,8 +630,8 @@ pub extern "C" fn LocalCommitmentTransaction_set_per_htlc(this_ptr: &mut LocalCo
 #[must_use]
 #[no_mangle]
 pub extern "C" fn LocalCommitmentTransaction_new_missing_local_sig(mut unsigned_tx: crate::c_types::derived::CVec_u8Z, mut their_sig: crate::c_types::Signature, our_funding_key: crate::c_types::PublicKey, their_funding_key: crate::c_types::PublicKey, mut local_keys: crate::ln::chan_utils::TxCreationKeys, mut feerate_per_kw: u32, mut htlc_data: crate::c_types::derived::CVec_C2Tuple_HTLCOutputInCommitmentSignatureZZ) -> crate::ln::chan_utils::LocalCommitmentTransaction {
-	let mut local_htlc_data = Vec::new(); for mut item in htlc_data.into_rust().drain(..) { local_htlc_data.push( { let (mut orig_htlc_data_0_0, mut orig_htlc_data_0_1) = item.to_rust(); let mut local_orig_htlc_data_0_1 = if orig_htlc_data_0_1.is_null() { None } else { Some( { orig_htlc_data_0_1.into_rust() }) }; let mut local_htlc_data_0 = (*unsafe { Box::from_raw(orig_htlc_data_0_0.inner.take_ptr()) }, local_orig_htlc_data_0_1); local_htlc_data_0 }); };
-	let mut ret = lightning::ln::chan_utils::LocalCommitmentTransaction::new_missing_local_sig(::bitcoin::consensus::encode::deserialize(&unsigned_tx.into_rust()[..]).unwrap(), their_sig.into_rust(), &our_funding_key.into_rust(), &their_funding_key.into_rust(), *unsafe { Box::from_raw(local_keys.inner.take_ptr()) }, feerate_per_kw, local_htlc_data);
+	let mut local_htlc_data = Vec::new(); for mut item in htlc_data.into_rust().drain(..) { local_htlc_data.push( { let (mut orig_htlc_data_0_0, mut orig_htlc_data_0_1) = item.to_rust(); let mut local_orig_htlc_data_0_1 = if orig_htlc_data_0_1.is_null() { None } else { Some( { orig_htlc_data_0_1.into_rust() }) }; let mut local_htlc_data_0 = (*unsafe { Box::from_raw(orig_htlc_data_0_0.take_ptr()) }, local_orig_htlc_data_0_1); local_htlc_data_0 }); };
+	let mut ret = lightning::ln::chan_utils::LocalCommitmentTransaction::new_missing_local_sig(::bitcoin::consensus::encode::deserialize(&unsigned_tx.into_rust()[..]).unwrap(), their_sig.into_rust(), &our_funding_key.into_rust(), &their_funding_key.into_rust(), *unsafe { Box::from_raw(local_keys.take_ptr()) }, feerate_per_kw, local_htlc_data);
 	crate::ln::chan_utils::LocalCommitmentTransaction { inner: Box::into_raw(Box::new(ret)), _underlying_ref: false }
 }
 

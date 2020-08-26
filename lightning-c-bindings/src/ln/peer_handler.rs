@@ -38,6 +38,16 @@ pub extern "C" fn MessageHandler_free(this_ptr: MessageHandler) { }
 extern "C" fn MessageHandler_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeMessageHandler); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl MessageHandler {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeMessageHandler {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// A message handler which handles messages specific to channels. Usually this is just a
 /// ChannelManager object.
 #[no_mangle]
@@ -196,6 +206,16 @@ pub extern "C" fn PeerHandleError_free(this_ptr: PeerHandleError) { }
 extern "C" fn PeerHandleError_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativePeerHandleError); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl PeerHandleError {
+	pub(crate) fn take_ptr(mut self) -> *mut nativePeerHandleError {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// Used to indicate that we probably can't make any future connections to this peer, implying
 /// we should go ahead and force-close any channels we have with it.
 #[no_mangle]
@@ -251,13 +271,23 @@ pub extern "C" fn PeerManager_free(this_ptr: PeerManager) { }
 extern "C" fn PeerManager_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativePeerManager); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl PeerManager {
+	pub(crate) fn take_ptr(mut self) -> *mut nativePeerManager {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// Constructs a new PeerManager with the given message handlers and node_id secret key
 /// ephemeral_random_data is used to derive per-connection ephemeral keys and must be
 /// cryptographically secure random bytes.
 #[must_use]
 #[no_mangle]
 pub extern "C" fn PeerManager_new(mut message_handler: crate::ln::peer_handler::MessageHandler, mut our_node_secret: crate::c_types::SecretKey, ephemeral_random_data: *const [u8; 32], mut logger: crate::util::logger::Logger) -> PeerManager {
-	let mut ret = lightning::ln::peer_handler::PeerManager::new(*unsafe { Box::from_raw(message_handler.inner.take_ptr()) }, our_node_secret.into_rust(), unsafe { &*ephemeral_random_data}, logger);
+	let mut ret = lightning::ln::peer_handler::PeerManager::new(*unsafe { Box::from_raw(message_handler.take_ptr()) }, our_node_secret.into_rust(), unsafe { &*ephemeral_random_data}, logger);
 	PeerManager { inner: Box::into_raw(Box::new(ret)), _underlying_ref: false }
 }
 

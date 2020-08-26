@@ -32,6 +32,16 @@ pub extern "C" fn NetworkGraph_free(this_ptr: NetworkGraph) { }
 extern "C" fn NetworkGraph_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeNetworkGraph); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl NetworkGraph {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeNetworkGraph {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 
 use lightning::routing::network_graph::LockedNetworkGraph as nativeLockedNetworkGraphImport;
 type nativeLockedNetworkGraph = nativeLockedNetworkGraphImport<'static>;
@@ -61,6 +71,16 @@ pub extern "C" fn LockedNetworkGraph_free(this_ptr: LockedNetworkGraph) { }
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn LockedNetworkGraph_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeLockedNetworkGraph); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl LockedNetworkGraph {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeLockedNetworkGraph {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }
 
 use lightning::routing::network_graph::NetGraphMsgHandler as nativeNetGraphMsgHandlerImport;
@@ -94,6 +114,16 @@ pub extern "C" fn NetGraphMsgHandler_free(this_ptr: NetGraphMsgHandler) { }
 extern "C" fn NetGraphMsgHandler_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeNetGraphMsgHandler); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl NetGraphMsgHandler {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeNetGraphMsgHandler {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// Creates a new tracker of the actual state of the network of channels and nodes,
 /// assuming a fresh network graph.
 /// Chain monitor is used to make sure announced channels exist on-chain,
@@ -111,7 +141,7 @@ pub extern "C" fn NetGraphMsgHandler_new(mut chain_monitor: crate::chain::chaini
 #[must_use]
 #[no_mangle]
 pub extern "C" fn NetGraphMsgHandler_from_net_graph(mut chain_monitor: crate::chain::chaininterface::ChainWatchInterface, mut logger: crate::util::logger::Logger, mut network_graph: crate::routing::network_graph::NetworkGraph) -> NetGraphMsgHandler {
-	let mut ret = lightning::routing::network_graph::NetGraphMsgHandler::from_net_graph(chain_monitor, logger, *unsafe { Box::from_raw(network_graph.inner.take_ptr()) });
+	let mut ret = lightning::routing::network_graph::NetGraphMsgHandler::from_net_graph(chain_monitor, logger, *unsafe { Box::from_raw(network_graph.take_ptr()) });
 	NetGraphMsgHandler { inner: Box::into_raw(Box::new(ret)), _underlying_ref: false }
 }
 
@@ -218,6 +248,16 @@ pub extern "C" fn DirectionalChannelInfo_free(this_ptr: DirectionalChannelInfo) 
 extern "C" fn DirectionalChannelInfo_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeDirectionalChannelInfo); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl DirectionalChannelInfo {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeDirectionalChannelInfo {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// When the last update to the channel direction was issued.
 /// Value is opaque, as set in the announcement.
 #[no_mangle]
@@ -305,6 +345,16 @@ pub extern "C" fn ChannelInfo_free(this_ptr: ChannelInfo) { }
 extern "C" fn ChannelInfo_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeChannelInfo); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl ChannelInfo {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeChannelInfo {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// Source node of the first direction of a channel
 #[no_mangle]
 pub extern "C" fn ChannelInfo_get_node_one(this_ptr: &ChannelInfo) -> crate::c_types::PublicKey {
@@ -326,7 +376,7 @@ pub extern "C" fn ChannelInfo_get_one_to_two(this_ptr: &ChannelInfo) -> crate::r
 /// Details about the first direction of a channel
 #[no_mangle]
 pub extern "C" fn ChannelInfo_set_one_to_two(this_ptr: &mut ChannelInfo, mut val: crate::routing::network_graph::DirectionalChannelInfo) {
-	let mut local_val = if val.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(val.inner.take_ptr()) } }) };
+	let mut local_val = if val.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(val.take_ptr()) } }) };
 	unsafe { &mut *this_ptr.inner }.one_to_two = local_val;
 }
 /// Source node of the second direction of a channel
@@ -350,7 +400,7 @@ pub extern "C" fn ChannelInfo_get_two_to_one(this_ptr: &ChannelInfo) -> crate::r
 /// Details about the second direction of a channel
 #[no_mangle]
 pub extern "C" fn ChannelInfo_set_two_to_one(this_ptr: &mut ChannelInfo, mut val: crate::routing::network_graph::DirectionalChannelInfo) {
-	let mut local_val = if val.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(val.inner.take_ptr()) } }) };
+	let mut local_val = if val.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(val.take_ptr()) } }) };
 	unsafe { &mut *this_ptr.inner }.two_to_one = local_val;
 }
 #[no_mangle]
@@ -392,6 +442,16 @@ pub extern "C" fn RoutingFees_free(this_ptr: RoutingFees) { }
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn RoutingFees_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeRoutingFees); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl RoutingFees {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeRoutingFees {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }
 impl Clone for RoutingFees {
 	fn clone(&self) -> Self {
@@ -478,6 +538,16 @@ pub extern "C" fn NodeAnnouncementInfo_free(this_ptr: NodeAnnouncementInfo) { }
 extern "C" fn NodeAnnouncementInfo_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeNodeAnnouncementInfo); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl NodeAnnouncementInfo {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeNodeAnnouncementInfo {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// When the last known update to the node state was issued.
 /// Value is opaque, as set in the announcement.
 #[no_mangle]
@@ -563,6 +633,16 @@ pub extern "C" fn NodeInfo_free(this_ptr: NodeInfo) { }
 extern "C" fn NodeInfo_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeNodeInfo); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl NodeInfo {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeNodeInfo {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// All valid channels a node has announced
 #[no_mangle]
 pub extern "C" fn NodeInfo_set_channels(this_ptr: &mut NodeInfo, mut val: crate::c_types::derived::CVec_u64Z) {
@@ -583,7 +663,7 @@ pub extern "C" fn NodeInfo_get_lowest_inbound_channel_fees(this_ptr: &NodeInfo) 
 /// meaning they don't have to refer to the same channel.
 #[no_mangle]
 pub extern "C" fn NodeInfo_set_lowest_inbound_channel_fees(this_ptr: &mut NodeInfo, mut val: crate::routing::network_graph::RoutingFees) {
-	let mut local_val = if val.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(val.inner.take_ptr()) } }) };
+	let mut local_val = if val.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(val.take_ptr()) } }) };
 	unsafe { &mut *this_ptr.inner }.lowest_inbound_channel_fees = local_val;
 }
 /// More information about a node from node_announcement.
@@ -600,15 +680,15 @@ pub extern "C" fn NodeInfo_get_announcement_info(this_ptr: &NodeInfo) -> crate::
 /// a channel announcement, but before receiving a node announcement.
 #[no_mangle]
 pub extern "C" fn NodeInfo_set_announcement_info(this_ptr: &mut NodeInfo, mut val: crate::routing::network_graph::NodeAnnouncementInfo) {
-	let mut local_val = if val.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(val.inner.take_ptr()) } }) };
+	let mut local_val = if val.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(val.take_ptr()) } }) };
 	unsafe { &mut *this_ptr.inner }.announcement_info = local_val;
 }
 #[must_use]
 #[no_mangle]
 pub extern "C" fn NodeInfo_new(mut channels_arg: crate::c_types::derived::CVec_u64Z, mut lowest_inbound_channel_fees_arg: crate::routing::network_graph::RoutingFees, mut announcement_info_arg: crate::routing::network_graph::NodeAnnouncementInfo) -> NodeInfo {
 	let mut local_channels_arg = Vec::new(); for mut item in channels_arg.into_rust().drain(..) { local_channels_arg.push( { item }); };
-	let mut local_lowest_inbound_channel_fees_arg = if lowest_inbound_channel_fees_arg.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(lowest_inbound_channel_fees_arg.inner.take_ptr()) } }) };
-	let mut local_announcement_info_arg = if announcement_info_arg.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(announcement_info_arg.inner.take_ptr()) } }) };
+	let mut local_lowest_inbound_channel_fees_arg = if lowest_inbound_channel_fees_arg.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(lowest_inbound_channel_fees_arg.take_ptr()) } }) };
+	let mut local_announcement_info_arg = if announcement_info_arg.inner.is_null() { None } else { Some( { *unsafe { Box::from_raw(announcement_info_arg.take_ptr()) } }) };
 	NodeInfo { inner: Box::into_raw(Box::new(nativeNodeInfo {
 		channels: local_channels_arg,
 		lowest_inbound_channel_fees: local_lowest_inbound_channel_fees_arg,

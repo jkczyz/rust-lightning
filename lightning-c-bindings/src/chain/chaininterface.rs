@@ -365,6 +365,16 @@ pub extern "C" fn ChainWatchedUtil_free(this_ptr: ChainWatchedUtil) { }
 extern "C" fn ChainWatchedUtil_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeChainWatchedUtil); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl ChainWatchedUtil {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeChainWatchedUtil {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// Constructs an empty (watches nothing) ChainWatchedUtil
 #[must_use]
 #[no_mangle]
@@ -443,6 +453,16 @@ pub extern "C" fn BlockNotifier_free(this_ptr: BlockNotifier) { }
 extern "C" fn BlockNotifier_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeBlockNotifier); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl BlockNotifier {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeBlockNotifier {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 /// Constructs a new BlockNotifier without any listeners.
 #[must_use]
 #[no_mangle]
@@ -515,6 +535,16 @@ pub extern "C" fn ChainWatchInterfaceUtil_free(this_ptr: ChainWatchInterfaceUtil
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn ChainWatchInterfaceUtil_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeChainWatchInterfaceUtil); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl ChainWatchInterfaceUtil {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeChainWatchInterfaceUtil {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }
 #[no_mangle]
 pub extern "C" fn ChainWatchInterfaceUtil_as_ChainWatchInterface(this_arg: *const ChainWatchInterfaceUtil) -> crate::chain::chaininterface::ChainWatchInterface {

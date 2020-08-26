@@ -35,6 +35,16 @@ pub extern "C" fn OutPoint_free(this_ptr: OutPoint) { }
 extern "C" fn OutPoint_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeOutPoint); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl OutPoint {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeOutPoint {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 impl Clone for OutPoint {
 	fn clone(&self) -> Self {
 		Self {

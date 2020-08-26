@@ -48,6 +48,16 @@ pub extern "C" fn InitFeatures_free(this_ptr: InitFeatures) { }
 extern "C" fn InitFeatures_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeInitFeatures); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl InitFeatures {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeInitFeatures {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 
 use lightning::ln::features::NodeFeatures as nativeNodeFeaturesImport;
 type nativeNodeFeatures = nativeNodeFeaturesImport;
@@ -76,6 +86,16 @@ pub extern "C" fn NodeFeatures_free(this_ptr: NodeFeatures) { }
 extern "C" fn NodeFeatures_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeNodeFeatures); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl NodeFeatures {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeNodeFeatures {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 
 use lightning::ln::features::ChannelFeatures as nativeChannelFeaturesImport;
 type nativeChannelFeatures = nativeChannelFeaturesImport;
@@ -103,4 +123,14 @@ pub extern "C" fn ChannelFeatures_free(this_ptr: ChannelFeatures) { }
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn ChannelFeatures_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeChannelFeatures); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl ChannelFeatures {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeChannelFeatures {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }

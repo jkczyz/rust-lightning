@@ -82,7 +82,7 @@ impl SpendableOutputDescriptor {
 				let mut outpoint_nonref = (*outpoint).clone();
 				let mut output_nonref = (*output).clone();
 				nativeSpendableOutputDescriptor::StaticOutput {
-					outpoint: *unsafe { Box::from_raw(outpoint_nonref.inner.take_ptr()) },
+					outpoint: *unsafe { Box::from_raw(outpoint_nonref.take_ptr()) },
 					output: output_nonref.into_rust(),
 				}
 			},
@@ -95,7 +95,7 @@ impl SpendableOutputDescriptor {
 				let (mut orig_key_derivation_params_nonref_0, mut orig_key_derivation_params_nonref_1) = key_derivation_params_nonref.to_rust(); let mut local_key_derivation_params_nonref = (orig_key_derivation_params_nonref_0, orig_key_derivation_params_nonref_1);
 				let mut remote_revocation_pubkey_nonref = (*remote_revocation_pubkey).clone();
 				nativeSpendableOutputDescriptor::DynamicOutputP2WSH {
-					outpoint: *unsafe { Box::from_raw(outpoint_nonref.inner.take_ptr()) },
+					outpoint: *unsafe { Box::from_raw(outpoint_nonref.take_ptr()) },
 					per_commitment_point: per_commitment_point_nonref.into_rust(),
 					to_self_delay: to_self_delay_nonref,
 					output: output_nonref.into_rust(),
@@ -109,7 +109,7 @@ impl SpendableOutputDescriptor {
 				let mut key_derivation_params_nonref = (*key_derivation_params).clone();
 				let (mut orig_key_derivation_params_nonref_0, mut orig_key_derivation_params_nonref_1) = key_derivation_params_nonref.to_rust(); let mut local_key_derivation_params_nonref = (orig_key_derivation_params_nonref_0, orig_key_derivation_params_nonref_1);
 				nativeSpendableOutputDescriptor::StaticOutputRemotePayment {
-					outpoint: *unsafe { Box::from_raw(outpoint_nonref.inner.take_ptr()) },
+					outpoint: *unsafe { Box::from_raw(outpoint_nonref.take_ptr()) },
 					output: output_nonref.into_rust(),
 					key_derivation_params: local_key_derivation_params_nonref,
 				}
@@ -121,14 +121,14 @@ impl SpendableOutputDescriptor {
 		match self {
 			SpendableOutputDescriptor::StaticOutput {mut outpoint, mut output, } => {
 				nativeSpendableOutputDescriptor::StaticOutput {
-					outpoint: *unsafe { Box::from_raw(outpoint.inner.take_ptr()) },
+					outpoint: *unsafe { Box::from_raw(outpoint.take_ptr()) },
 					output: output.into_rust(),
 				}
 			},
 			SpendableOutputDescriptor::DynamicOutputP2WSH {mut outpoint, mut per_commitment_point, mut to_self_delay, mut output, mut key_derivation_params, mut remote_revocation_pubkey, } => {
 				let (mut orig_key_derivation_params_0, mut orig_key_derivation_params_1) = key_derivation_params.to_rust(); let mut local_key_derivation_params = (orig_key_derivation_params_0, orig_key_derivation_params_1);
 				nativeSpendableOutputDescriptor::DynamicOutputP2WSH {
-					outpoint: *unsafe { Box::from_raw(outpoint.inner.take_ptr()) },
+					outpoint: *unsafe { Box::from_raw(outpoint.take_ptr()) },
 					per_commitment_point: per_commitment_point.into_rust(),
 					to_self_delay: to_self_delay,
 					output: output.into_rust(),
@@ -139,7 +139,7 @@ impl SpendableOutputDescriptor {
 			SpendableOutputDescriptor::StaticOutputRemotePayment {mut outpoint, mut output, mut key_derivation_params, } => {
 				let (mut orig_key_derivation_params_0, mut orig_key_derivation_params_1) = key_derivation_params.to_rust(); let mut local_key_derivation_params = (orig_key_derivation_params_0, orig_key_derivation_params_1);
 				nativeSpendableOutputDescriptor::StaticOutputRemotePayment {
-					outpoint: *unsafe { Box::from_raw(outpoint.inner.take_ptr()) },
+					outpoint: *unsafe { Box::from_raw(outpoint.take_ptr()) },
 					output: output.into_rust(),
 					key_derivation_params: local_key_derivation_params,
 				}
@@ -568,6 +568,16 @@ pub extern "C" fn InMemoryChannelKeys_free(this_ptr: InMemoryChannelKeys) { }
 extern "C" fn InMemoryChannelKeys_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeInMemoryChannelKeys); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl InMemoryChannelKeys {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeInMemoryChannelKeys {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 impl Clone for InMemoryChannelKeys {
 	fn clone(&self) -> Self {
 		Self {
@@ -832,6 +842,16 @@ pub extern "C" fn KeysManager_free(this_ptr: KeysManager) { }
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn KeysManager_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeKeysManager); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl KeysManager {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeKeysManager {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }
 /// Constructs a KeysManager from a 32-byte seed. If the seed is in some way biased (eg your
 /// CSRNG is busted) this may panic (but more importantly, you will possibly lose funds).

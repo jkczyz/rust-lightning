@@ -44,6 +44,16 @@ pub extern "C" fn ChannelMonitorUpdate_free(this_ptr: ChannelMonitorUpdate) { }
 extern "C" fn ChannelMonitorUpdate_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeChannelMonitorUpdate); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl ChannelMonitorUpdate {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeChannelMonitorUpdate {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 impl Clone for ChannelMonitorUpdate {
 	fn clone(&self) -> Self {
 		Self {
@@ -204,6 +214,16 @@ pub extern "C" fn MonitorUpdateError_free(this_ptr: MonitorUpdateError) { }
 extern "C" fn MonitorUpdateError_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeMonitorUpdateError); }
 }
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl MonitorUpdateError {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeMonitorUpdateError {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
+}
 
 use lightning::ln::channelmonitor::MonitorEvent as nativeMonitorEventImport;
 type nativeMonitorEvent = nativeMonitorEventImport;
@@ -231,6 +251,16 @@ pub extern "C" fn MonitorEvent_free(this_ptr: MonitorEvent) { }
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn MonitorEvent_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeMonitorEvent); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl MonitorEvent {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeMonitorEvent {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }
 
 use lightning::ln::channelmonitor::HTLCUpdate as nativeHTLCUpdateImport;
@@ -260,6 +290,16 @@ pub extern "C" fn HTLCUpdate_free(this_ptr: HTLCUpdate) { }
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn HTLCUpdate_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeHTLCUpdate); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl HTLCUpdate {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeHTLCUpdate {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }
 impl Clone for HTLCUpdate {
 	fn clone(&self) -> Self {
@@ -322,6 +362,16 @@ pub extern "C" fn ChannelMonitor_free(this_ptr: ChannelMonitor) { }
 /// Used only if an object of this type is returned as a trait impl by a method
 extern "C" fn ChannelMonitor_free_void(this_ptr: *mut c_void) {
 	unsafe { let _ = Box::from_raw(this_ptr as *mut nativeChannelMonitor); }
+}
+#[allow(unused)]
+/// When moving out of the pointer, we have to ensure we aren't a reference, this makes that easy
+impl ChannelMonitor {
+	pub(crate) fn take_ptr(mut self) -> *mut nativeChannelMonitor {
+		assert!(!self._underlying_ref);
+		let ret = self.inner;
+		self.inner = std::ptr::null_mut();
+		ret
+	}
 }
 /// Simple trait indicating ability to track a set of ChannelMonitors and multiplex events between
 /// them. Generally should be implemented by keeping a local SimpleManyChannelMonitor and passing
@@ -404,7 +454,7 @@ impl rustManyChannelMonitor for ManyChannelMonitor {
 	}
 	fn get_and_clear_pending_monitor_events(&self) -> Vec<lightning::ln::channelmonitor::MonitorEvent> {
 		let mut ret = (self.get_and_clear_pending_monitor_events)(self.this_arg);
-		let mut local_ret = Vec::new(); for mut item in ret.into_rust().drain(..) { local_ret.push( { *unsafe { Box::from_raw(item.inner.take_ptr()) } }); };
+		let mut local_ret = Vec::new(); for mut item in ret.into_rust().drain(..) { local_ret.push( { *unsafe { Box::from_raw(item.take_ptr()) } }); };
 		local_ret
 	}
 }
@@ -434,7 +484,7 @@ impl Drop for ManyChannelMonitor {
 #[must_use]
 #[no_mangle]
 pub extern "C" fn ChannelMonitor_update_monitor(this_arg: &mut ChannelMonitor, mut updates: crate::ln::channelmonitor::ChannelMonitorUpdate, broadcaster: &crate::chain::chaininterface::BroadcasterInterface, logger: &crate::util::logger::Logger) -> crate::c_types::derived::CResult_NoneMonitorUpdateErrorZ {
-	let mut ret = unsafe { &mut (*(this_arg.inner as *mut nativeChannelMonitor)) }.update_monitor(*unsafe { Box::from_raw(updates.inner.take_ptr()) }, broadcaster, logger);
+	let mut ret = unsafe { &mut (*(this_arg.inner as *mut nativeChannelMonitor)) }.update_monitor(*unsafe { Box::from_raw(updates.take_ptr()) }, broadcaster, logger);
 	let mut local_ret = match ret { Ok(mut o) => crate::c_types::CResultTempl::ok( { 0u8 /*o*/ }), Err(mut e) => crate::c_types::CResultTempl::err( { crate::ln::channelmonitor::MonitorUpdateError { inner: Box::into_raw(Box::new(e)), _underlying_ref: false } }) };
 	local_ret
 }
