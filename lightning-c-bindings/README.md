@@ -24,9 +24,10 @@ type getting an `LDK` prefix to their native Rust type names.
    You MUST NOT create such wrapper structs manually, relying instead on constructors which have
    been mapped from equivalent Rust constructors.
 
-   Note that, thanks to the is-reference flag, such structs effectively represent both `&RustThing`
-   and `RustThing`. Further, the same applies to `Option<RustThing>`, in which cases `inner` may be
-   set to NULL.
+   Note that, thanks to the is-reference flag and the pointer being NULLable, such structs
+   effectively represent both `&RustThing`, `RustThing`, and `Option<RustThing>`. Check the
+   corresponding Rust documentation for the function or struct you are using to ensure you use
+   the correct call semantics.
 
    For example, this is the mapping of ChannelManager.
    ```
@@ -50,7 +51,10 @@ type getting an `LDK` prefix to their native Rust type names.
    Each trait additionally contains a `free` and `clone` function pointer, which may be NULL. The
    `free` function is passed the void pointer when the object is `Drop`ed in Rust. The `clone`
    function is passed the void pointer when the object is `Clone`ed in Rust, returning a new void
-   pointer for the new object.
+   pointer for the new object. If the `free` pointer is NULL, you will not receive any notification
+   when the trait is no longer needed. If the `clone` pointer is NULL, we assume that the trait
+   object may be `memcpy()`'d to create copies. Note that if you release resources with `free`
+   without implementing `clone`, you will likely end up with use-after-free bugs.
 
    For example, `LDKSocketDescriptor` is mapped as follows:
    ```
@@ -126,11 +130,11 @@ type getting an `LDK` prefix to their native Rust type names.
    struct as their first argument. Free-standing functions are mapped simply as `function_name` and
    take the relevant mapped type arguments.
 
-   Functions may return a reference to an underlying Rust object with a mapped struct or an owned
-   Rust object with the same. The mapped struct contains a flag to indicate if the pointed-to Rust
-   object is owned or only a reference, and the object's corresponding free function will Do The
-   Right Thing based on the flag. In order to determine the expected return type, you should
-   reference the Rust documentation for the function.
+   Functions which return `&OpaqueRustType` and which return `OpaqueRustType` are both mapped to a
+   function returning an owned wrapper struct. The `_underlying_ref` flag (see above) will be set
+   to indicate that the pointed-to Rust object is owned or only a reference. Thus, when
+   implementing a function which Rust will call or calling a Rust function, you should check the
+   Rust documentation for the function to determine which behavior is expected.
 
    Similarly, when a function takes an `Option<RustType>` as a parameter or a return value, the C
    type is the same as if it took only `RustType`, with the `inner` field set to NULL to indicate
