@@ -113,7 +113,9 @@ uint32_t get_fee(const void *this_arg, LDKConfirmationTarget target) {
 	// Note that we don't call _free() on target, but that's OK, its unitary
 }
 
+static int num_txs_broadcasted = 0; // Technically a race, but ints are atomic on x86
 void broadcast_tx(const void *this_arg, LDKTransaction tx) {
+	num_txs_broadcasted += 1;
 	//TODO
 }
 
@@ -521,6 +523,21 @@ int main() {
 		assert(events->data[0].tag == LDKEvent_PaymentSent);
 		assert(!memcmp(events->data[0].payment_sent.payment_preimage.data, payment_preimage_1.data, 32));
 	}
+
+	// Close the channel.
+	uint8_t chan_id[32];
+	for (int i = 0; i < 32; i++) { chan_id[i] = channel_open_txid[31-i]; }
+	LDK::CResult_NoneAPIErrorZ close_res = ChannelManager_close_channel(&cm1, &chan_id);
+	assert(close_res->result_ok);
+	PeerManager_process_events(&net1);
+	num_txs_broadcasted = 0;
+	while (num_txs_broadcasted != 2) {
+		std::this_thread::yield();
+	}
+	LDK::CVec_ChannelDetailsZ chans_after_close1 = ChannelManager_list_channels(&cm1);
+	assert(chans_after_close1->datalen == 0);
+	LDK::CVec_ChannelDetailsZ chans_after_close2 = ChannelManager_list_channels(&cm2);
+	assert(chans_after_close2->datalen == 0);
 
 	close(pipefds_1_to_2[0]);
 	close(pipefds_2_to_1[0]);
