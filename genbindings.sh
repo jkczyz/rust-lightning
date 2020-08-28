@@ -42,12 +42,14 @@ sed -i 's/typedef LDKnative.*Import.*LDKnative.*;//g' include/lightning.h
 gcc -Wall -g -pthread demo.c ../target/debug/liblightning.a -ldl
 ./a.out
 
-# And run the C++ demo app in valgrind to test memory model correctness
-# Note that there are a few leaks currently, so we don't fail the script for leaks,
-# but ideally we shouldn't add new leaks and once we fix the existing ones we should
-# fail in response to any memory leaks.
+# And run the C++ demo app in valgrind to test memory model correctness and lack of leaks.
 g++ -Wall -g -pthread demo.cpp -L../target/debug/ -llightning -ldl
-LD_LIBRARY_PATH=../target/debug/ valgrind --error-exitcode=4 --memcheck:leak-check=full --show-leak-kinds=all ./a.out
+if [ -x `which valgrind` ]; then
+	LD_LIBRARY_PATH=../target/debug/ valgrind --error-exitcode=4 --memcheck:leak-check=full --show-leak-kinds=all ./a.out
+	echo
+else
+	echo "WARNING: Please install valgrind for more testing"
+fi
 
 # Test a statically-linked C++ version, tracking the resulting binary size and runtime 
 # across debug, LTO, and cross-language LTO builds (using the same compiler each time).
@@ -56,6 +58,57 @@ clang++ -Wall -pthread demo.cpp ../target/debug/liblightning.a -ldl
 echo " C++ Bin size and runtime w/o optimization:"
 ls -lha a.out
 time ./a.out > /dev/null
+
+HOST_PLATFORM="$(rustc --version --verbose | grep "host:")"
+
+# Then, check with memory sanitizer, if we're on Linux and have rustc nightly
+if [ "$HOST_PLATFORM" = "host: x86_64-unknown-linux-gnu" ]; then
+	if cargo +nightly --version >/dev/null 2>&1; then
+		LLVM_V=$(rustc +nightly --version --verbose | grep "LLVM version" | awk '{ print substr($3, 0, 2); }')
+		if [ -x "$(which clang-$LLVM_V)" ]; then
+			cargo +nightly clean
+			cargo +nightly rustc -Zbuild-std --target x86_64-unknown-linux-gnu -v -- -Zsanitizer=memory -Zsanitizer-memory-track-origins -Cforce-frame-pointers=yes
+			mv ../target/x86_64-unknown-linux-gnu/debug/liblightning.* ../target/debug/
+
+			# Sadly, std doesn't seem to compile into something that is memsan-safe as of Aug 2020,
+			# so we'll always fail, not to mention we may be linking against git rustc LLVM which
+			# may differ from clang-llvm, so just allow everything here to fail.
+			set +e
+
+			# First the C demo app...
+			clang-$LLVM_V -fsanitize=memory -fsanitize-memory-track-origins -Wall -g -pthread demo.c ../target/debug/liblightning.a -ldl
+			./a.out
+
+			# ...then the C++ demo app
+			clang++-$LLVM_V -fsanitize=memory -fsanitize-memory-track-origins -Wall -g -pthread demo.cpp ../target/debug/liblightning.a -ldl
+			./a.out
+
+			# restore exit-on-failure
+			set -e
+		else
+			echo "WARNING: Can't use memory sanitizer without clang-$LLVM_V"
+		fi
+	else
+		echo "WARNING: Can't use memory sanitizer without rustc nightly"
+	fi
+else
+	echo "WARNING: Can't use memory sanitizer on non-Linux, non-x86 platforms"
+fi
+
+# Finally, if we're on OSX or on Linux, build the final debug binary with address sanitizer (and leave it there)
+if [ "$HOST_PLATFORM" = "host: x86_64-unknown-linux-gnu" -o "$HOST_PLATFORM" = "host: x86_64-apple-darwin" ]; then
+	RUSTC_BOOTSTRAP=1 cargo rustc -v -- -Zsanitizer=address -Cforce-frame-pointers=yes
+
+	# First the C demo app...
+	clang -fsanitize=address -Wall -g -pthread demo.c ../target/debug/liblightning.a -ldl
+	ASAN_OPTIONS='detect_leaks=1 detect_invalid_pointer_pairs=1 detect_stack_use_after_return=1' ./a.out
+
+	# ...then the C++ demo app
+	clang++ -fsanitize=address -Wall -g -pthread demo.cpp ../target/debug/liblightning.a -ldl
+	ASAN_OPTIONS='detect_leaks=1 detect_invalid_pointer_pairs=1 detect_stack_use_after_return=1' ./a.out
+else
+	echo "WARNING: Can't use address sanitizer on non-Linux, non-OSX non-x86 platforms"
+fi
 
 # Now build with LTO on on both C++ and rust, but without cross-language LTO:
 cargo rustc -v --release -- -C lto
