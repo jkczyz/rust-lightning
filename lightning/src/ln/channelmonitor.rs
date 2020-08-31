@@ -242,8 +242,10 @@ impl<ChanSigner: ChannelKeys, T: Deref, F: Deref, L: Deref> ChainMonitor<ChanSig
 	      F::Target: FeeEstimator,
 	      L::Target: Logger,
 {
-	/// Delegates to [`ChannelMonitor::block_connected`] for each watched channel. Any HTLCs that
-	/// were resolved on chain will be retuned by [`chain::Watch::release_pending_monitor_events`].
+	/// Dispatches to per-channel monitors, which are responsible for updating their on-chain view
+	/// of a channel and reacting accordingly based on transactions in the connected block. See
+	/// [`ChannelMonitor::block_connected`] for details. Any HTLCs that were resolved on chain will
+	/// be retuned by [`chain::Watch::release_pending_monitor_events`].
 	///
 	/// [`ChannelMonitor::block_connected`]: struct.ChannelMonitor.html#method.block_connected
 	/// [`chain::Watch::release_pending_monitor_events`]: ../../chain/trait.Watch.html#tymethod.release_pending_monitor_events
@@ -264,7 +266,9 @@ impl<ChanSigner: ChannelKeys, T: Deref, F: Deref, L: Deref> ChainMonitor<ChanSig
 		}
 	}
 
-	/// Delegates to [`ChannelMonitor::block_disconnected`] for each watched channel.
+	/// Dispatches to per-channel monitors, which are responsible for updating their on-chain view
+	/// of a channel based on the disconnected block. See [`ChannelMonitor::block_disconnected`] for
+	/// details.
 	///
 	/// [`ChannelMonitor::block_disconnected`]: struct.ChannelMonitor.html#method.block_disconnected
 	pub fn block_disconnected(&self, header: &BlockHeader, disconnected_height: u32) {
