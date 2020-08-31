@@ -1870,8 +1870,6 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 
 	/// Determines if any HTLCs have been resolved on chain in the connected block.
 	///
-	/// TODO: Include how `broadcaster` and `fee_estimator` are used.
-	///
 	/// Returns any transaction outputs from `txn_matched` that spends of should be watched for.
 	/// After called these are also available via [`get_outputs_to_watch`].
 	///
@@ -1982,8 +1980,6 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 
 	/// Determines if the disconnected block contained any transactions of interest and updates
 	/// appropriately.
-	///
-	/// TODO: Include how `broadcaster` and `fee_estimator` are used.
 	pub fn block_disconnected<B: Deref, F: Deref, L: Deref>(&mut self, header: &BlockHeader, height: u32, broadcaster: B, fee_estimator: F, logger: L)
 		where B::Target: BroadcasterInterface,
 		      F::Target: FeeEstimator,
