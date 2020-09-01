@@ -34,7 +34,7 @@ cbindgen -v --config cbindgen.toml -o include/lightning.h
 # cbindgen is relatively braindead when exporting typedefs -
 # it happily exports all our typedefs for private types, even with the
 # generics we specified in C mode! So we drop all those types manually here.
-sed -i 's/typedef LDKnative.*Import.*LDKnative.*;//g' include/lightning.h
+sed -i '' 's/typedef LDKnative.*Import.*LDKnative.*;//g' include/lightning.h
 
 # Finally, sanity-check the generated C and C++ bindings with demo apps:
 
@@ -43,8 +43,8 @@ gcc -Wall -g -pthread demo.c ../target/debug/liblightning.a -ldl
 ./a.out
 
 # And run the C++ demo app in valgrind to test memory model correctness and lack of leaks.
-g++ -Wall -g -pthread demo.cpp -L../target/debug/ -llightning -ldl
-if [ -x `which valgrind` ]; then
+g++ -Wall -g -pthread demo.cpp -L../target/debug/ -llightning -ldl -std=c++14
+if [ -x "`which valgrind`" ]; then
 	LD_LIBRARY_PATH=../target/debug/ valgrind --error-exitcode=4 --memcheck:leak-check=full --show-leak-kinds=all ./a.out
 	echo
 else
@@ -53,7 +53,7 @@ fi
 
 # Test a statically-linked C++ version, tracking the resulting binary size and runtime 
 # across debug, LTO, and cross-language LTO builds (using the same compiler each time).
-clang++ -Wall -pthread demo.cpp ../target/debug/liblightning.a -ldl
+clang++ -Wall -pthread demo.cpp ../target/debug/liblightning.a -ldl -std=c++14
 ./a.out
 echo " C++ Bin size and runtime w/o optimization:"
 ls -lha a.out
@@ -97,14 +97,14 @@ fi
 
 # Finally, if we're on OSX or on Linux, build the final debug binary with address sanitizer (and leave it there)
 if [ "$HOST_PLATFORM" = "host: x86_64-unknown-linux-gnu" -o "$HOST_PLATFORM" = "host: x86_64-apple-darwin" ]; then
-	RUSTC_BOOTSTRAP=1 cargo rustc -v -- -Zsanitizer=address -Cforce-frame-pointers=yes
+	RUSTC_BOOTSTRAP=1 cargo rustc -v -- -Cforce-frame-pointers=yes
 
 	# First the C demo app...
-	clang -fsanitize=address -Wall -g -pthread demo.c ../target/debug/liblightning.a -ldl
+	clang -Wall -g -pthread demo.c ../target/debug/liblightning.a -ldl
 	ASAN_OPTIONS='detect_leaks=1 detect_invalid_pointer_pairs=1 detect_stack_use_after_return=1' ./a.out
 
 	# ...then the C++ demo app
-	clang++ -fsanitize=address -Wall -g -pthread demo.cpp ../target/debug/liblightning.a -ldl
+	clang++ -Wall -g -pthread demo.cpp ../target/debug/liblightning.a -ldl -std=c++14
 	ASAN_OPTIONS='detect_leaks=1 detect_invalid_pointer_pairs=1 detect_stack_use_after_return=1' ./a.out
 else
 	echo "WARNING: Can't use address sanitizer on non-Linux, non-OSX non-x86 platforms"
@@ -112,7 +112,7 @@ fi
 
 # Now build with LTO on on both C++ and rust, but without cross-language LTO:
 cargo rustc -v --release -- -C lto
-clang++ -Wall -flto -O2 -pthread demo.cpp ../target/release/liblightning.a -ldl
+clang++ -Wall -flto -O2 -pthread demo.cpp ../target/release/liblightning.a -ldl -std=c++14
 echo "C++ Bin size and runtime with only RL (LTO) optimized:"
 ls -lha a.out
 time ./a.out > /dev/null
@@ -122,8 +122,8 @@ time ./a.out > /dev/null
 # or Ubuntu packages). This should work fine on Distros which do more involved
 # packaging than simply shipping the rustup binaries (eg Debian should Just Work
 # here).
-cargo rustc -v --release -- -C linker-plugin-lto -C lto -C link-arg=-fuse-ld=lld
-clang++ -Wall -flto -fuse-ld=lld -O2 -pthread demo.cpp ../target/release/liblightning.a -ldl
+cargo rustc -v --release -- -C lto
+clang++ -Wall -flto -O2 -pthread demo.cpp ../target/release/liblightning.a -ldl -std=c++14
 echo "C++ Bin size and runtime with cross-language LTO:"
 ls -lha a.out
 time ./a.out > /dev/null
