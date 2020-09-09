@@ -162,8 +162,8 @@ pub enum MonitorEvent {
 	CommitmentTxBroadcasted(OutPoint),
 }
 
-/// Simple structure send back by `chain::Watch` in case of HTLC detected onchain from a
-/// forward channel and from which info are needed to update HTLC in a backward channel.
+/// Simple structure sent back by `chain::Watch` when an HTLC is detected onchain from a forward
+/// channel. This is needed to update the corresponding HTLC in the originating channel.
 ///
 /// [`chain::Watch`]: ../../chain/trait.Watch.html
 #[derive(Clone, PartialEq)]
