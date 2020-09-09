@@ -150,12 +150,16 @@ pub fn do_test<Out: test_logger::Output>(data: &[u8], out: Out) {
 	}
 
 	let logger: Arc<dyn Logger> = Arc::new(test_logger::TestLogger::new("".to_owned(), out));
-	let chain_source = Arc::new(FuzzChainSource {
-		input: Arc::clone(&input),
-	});
+	let chain_source = if get_slice!(1)[0] % 2 == 0 {
+		None
+	} else {
+		Some(Arc::new(FuzzChainSource {
+			input: Arc::clone(&input),
+		}))
+	};
 
 	let our_pubkey = get_pubkey!();
-	let net_graph_msg_handler = NetGraphMsgHandler::new(Some(chain_source), Arc::clone(&logger));
+	let net_graph_msg_handler = NetGraphMsgHandler::new(chain_source, Arc::clone(&logger));
 
 	loop {
 		match get_slice!(1)[0] {
