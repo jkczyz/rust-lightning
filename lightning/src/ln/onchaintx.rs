@@ -28,6 +28,7 @@ use ln::chan_utils::{TxCreationKeys, LocalCommitmentTransaction};
 use chain::chaininterface::{FeeEstimator, BroadcasterInterface, ConfirmationTarget, MIN_RELAY_FEE_SAT_PER_1000_WEIGHT};
 use chain::channelmonitor::{ANTI_REORG_DELAY, CLTV_SHARED_CLAIM_BUFFER, InputMaterial, ClaimRequest};
 use chain::keysinterface::ChannelKeys;
+use chain::transaction::TransactionData;
 use util::logger::Logger;
 use util::ser::{Readable, Writer, Writeable};
 use util::byte_utils;
@@ -657,7 +658,7 @@ impl<ChanSigner: ChannelKeys> OnchainTxHandler<ChanSigner> {
 		None
 	}
 
-	pub(crate) fn block_connected<B: Deref, F: Deref, L: Deref>(&mut self, txn_matched: &[(usize, &Transaction)], claimable_outpoints: Vec<ClaimRequest>, height: u32, broadcaster: B, fee_estimator: F, logger: L)
+	pub(crate) fn block_connected<B: Deref, F: Deref, L: Deref>(&mut self, txn_matched: &TransactionData, claimable_outpoints: Vec<ClaimRequest>, height: u32, broadcaster: B, fee_estimator: F, logger: L)
 		where B::Target: BroadcasterInterface,
 		      F::Target: FeeEstimator,
 					L::Target: Logger,

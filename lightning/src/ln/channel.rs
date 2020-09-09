@@ -30,7 +30,7 @@ use ln::chan_utils::{CounterpartyCommitmentSecrets, LocalCommitmentTransaction, 
 use ln::chan_utils;
 use chain::chaininterface::{FeeEstimator,ConfirmationTarget};
 use chain::channelmonitor::{ChannelMonitor, ChannelMonitorUpdate, ChannelMonitorUpdateStep, HTLC_FAIL_BACK_BUFFER};
-use chain::transaction::OutPoint;
+use chain::transaction::{OutPoint, TransactionData};
 use chain::keysinterface::{ChannelKeys, KeysInterface};
 use util::transaction_utils;
 use util::ser::{Readable, Writeable, Writer};
@@ -3312,7 +3312,7 @@ impl<ChanSigner: ChannelKeys> Channel<ChanSigner> {
 	///
 	/// May return some HTLCs (and their payment_hash) which have timed out and should be failed
 	/// back.
-	pub fn block_connected(&mut self, header: &BlockHeader, txdata: &[(usize, &Transaction)], height: u32) -> Result<(Option<msgs::FundingLocked>, Vec<(HTLCSource, PaymentHash)>), msgs::ErrorMessage> {
+	pub fn block_connected(&mut self, header: &BlockHeader, txdata: &TransactionData, height: u32) -> Result<(Option<msgs::FundingLocked>, Vec<(HTLCSource, PaymentHash)>), msgs::ErrorMessage> {
 		let mut timed_out_htlcs = Vec::new();
 		self.holding_cell_htlc_updates.retain(|htlc_update| {
 			match htlc_update {
