@@ -2053,7 +2053,7 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 		self.last_block_hash = block_hash;
 	}
 
-	pub(crate) fn would_broadcast_at_height<L: Deref>(&self, height: u32, logger: &L) -> bool where L::Target: Logger {
+	fn would_broadcast_at_height<L: Deref>(&self, height: u32, logger: &L) -> bool where L::Target: Logger {
 		// We need to consider all HTLCs which are:
 		//  * in any unrevoked remote commitment transaction, as they could broadcast said
 		//    transactions and we'd end up in a race, or
