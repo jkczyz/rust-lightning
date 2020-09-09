@@ -245,7 +245,7 @@ impl<ChanSigner: ChannelKeys, T: Deref, F: Deref, L: Deref> ChainMonitor<ChanSig
 	/// Dispatches to per-channel monitors, which are responsible for updating their on-chain view
 	/// of a channel and reacting accordingly based on transactions in the connected block. See
 	/// [`ChannelMonitor::block_connected`] for details. Any HTLCs that were resolved on chain will
-	/// be retuned by [`chain::Watch::release_pending_monitor_events`].
+	/// be returned by [`chain::Watch::release_pending_monitor_events`].
 	///
 	/// [`ChannelMonitor::block_connected`]: struct.ChannelMonitor.html#method.block_connected
 	/// [`chain::Watch::release_pending_monitor_events`]: ../../chain/trait.Watch.html#tymethod.release_pending_monitor_events
