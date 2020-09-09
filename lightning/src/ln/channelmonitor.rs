@@ -331,8 +331,13 @@ impl<ChanSigner: ChannelKeys, C: Deref, T: Deref, F: Deref, L: Deref> ChainMonit
 	      F::Target: FeeEstimator,
 	      L::Target: Logger,
 {
-	/// Creates a new object which can be used to monitor several channels given the chain
-	/// interface with which to register to receive notifications.
+	/// Creates a new `ChainMonitor` used to watch on-chain activity pertaining to channels.
+	///
+	/// When an optional chain source implementing [`chain::Filter`] is provided, the chain monitor
+	/// will call back to it indicating transactions and outputs of interest. This allows users to
+	/// pre-filter blocks or only fetch blocks matching a compact filter.
+	///
+	/// [`chain::Filter`]: ../../chain/trait.Filter.html
 	pub fn new(chain_source: Option<C>, broadcaster: T, logger: L, feeest: F) -> Self {
 		Self {
 			monitors: Mutex::new(HashMap::new()),
