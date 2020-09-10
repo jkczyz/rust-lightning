@@ -174,10 +174,11 @@ pub struct HTLCUpdate {
 }
 impl_writeable!(HTLCUpdate, 0, { payment_hash, payment_preimage, source });
 
-/// An implementation of [`chain::Watch`].
+/// An implementation of [`chain::Watch`] for monitoring channels.
 ///
-/// May be used in conjunction with [`ChannelManager`] to monitor channels locally or used
-/// independently to monitor channels remotely.
+/// Connected and disconnected blocks must be provided to `ChainMonitor` as documented by
+/// [`chain::Watch`]. May be used in conjunction with [`ChannelManager`] to monitor channels locally
+/// or used independently to monitor channels remotely.
 ///
 /// [`chain::Watch`]: ../../chain/trait.Watch.html
 /// [`ChannelManager`]: ../channelmanager/struct.ChannelManager.html
