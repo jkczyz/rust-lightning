@@ -99,8 +99,8 @@ pub trait Watch: Send + Sync {
 /// channels.
 ///
 /// This is useful in order to have a [`Watch`] implementation convey to a chain source which
-/// transactions to be notified of. This may take the form of pre-filtering blocks or, in the case
-/// of [BIP 157]/[BIP 158], only fetching a block if the compact filter matches.
+/// transactions to be notified of. Notifying may take the form of pre-filtering blocks or, in the
+/// case of [BIP 157]/[BIP 158], only fetching a block if the compact filter matches.
 ///
 /// [`Watch`]: trait.Watch.html
 /// [BIP 157]: https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki
