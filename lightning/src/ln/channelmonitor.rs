@@ -334,8 +334,10 @@ impl<ChanSigner: ChannelKeys, C: Deref, T: Deref, F: Deref, L: Deref> ChainMonit
 	/// Creates a new `ChainMonitor` used to watch on-chain activity pertaining to channels.
 	///
 	/// When an optional chain source implementing [`chain::Filter`] is provided, the chain monitor
-	/// will call back to it indicating transactions and outputs of interest. This allows users to
-	/// pre-filter blocks or only fetch blocks matching a compact filter.
+	/// will call back to it indicating transactions and outputs of interest. This allows clients to
+	/// pre-filter blocks or only fetch blocks matching a compact filter. Otherwise, clients may
+	/// always need to fetch full blocks absent another means for determining which blocks contain
+	/// transactions relevant to the watched channels.
 	///
 	/// [`chain::Filter`]: ../../chain/trait.Filter.html
 	pub fn new(chain_source: Option<C>, broadcaster: T, logger: L, feeest: F) -> Self {
