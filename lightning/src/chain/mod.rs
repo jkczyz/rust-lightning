@@ -47,9 +47,10 @@ pub enum AccessError {
 /// The `Watch` trait defines behavior for watching on-chain activity pertaining to channels as
 /// blocks are connected and disconnected.
 ///
-/// Each channel is associated with a [`ChannelMonitor`]. Implementations are responsible for
-/// maintaining a set of monitors such that they can be updated accordingly as channel state changes
-/// and HTLCs are resolved on chain. See method documentation for specific requirements.
+/// Each channel is associated with a [`ChannelMonitor`]. Implementations of this trait are
+/// responsible for maintaining a set of monitors such that they can be updated accordingly as
+/// channel state changes and HTLCs are resolved on chain. See method documentation for specific
+/// requirements.
 ///
 /// TODO: Add documentation about persisting monitors.
 ///
