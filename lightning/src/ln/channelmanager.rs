@@ -3059,7 +3059,7 @@ impl<ChanSigner: ChannelKeys, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> 
         F::Target: FeeEstimator,
         L::Target: Logger,
 {
-	///
+	/// Updates channel state based on transactions seen in a connected block.
 	pub fn block_connected(&self, header: &BlockHeader, txdata: &[(usize, &Transaction)], height: u32) {
 		let header_hash = header.block_hash();
 		log_trace!(self.logger, "Block {} at height {} connected", header_hash, height);
@@ -3171,7 +3171,10 @@ impl<ChanSigner: ChannelKeys, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> 
 		}
 	}
 
-	/// We force-close the channel without letting our counterparty participate in the shutdown
+	/// Updates channel state based on a disconnected block.
+	///
+	/// If necessary, the channel may be force-closed without letting the counterparty participate
+	/// in the shutdown.
 	pub fn block_disconnected(&self, header: &BlockHeader) {
 		let _ = self.total_consistency_lock.read().unwrap();
 		let mut failed_channels = Vec::new();
