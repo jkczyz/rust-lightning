@@ -53,8 +53,8 @@ pub enum AccessError {
 /// requirements.
 ///
 /// Implementations **must** ensure that updates are successfully applied and persisted upon method
-/// completion. If an update fails, then it must immediately shut down without taking any further
-/// action such as persisting the current state.
+/// completion. If an update fails with a [`PermanentFailure`], then it must immediately shut down
+/// without taking any further action such as persisting the current state.
 ///
 /// If an implementation maintains multiple instances of a channel's monitor (e.g., by storing
 /// backup copies), then it must ensure that updates are applied across all instances. Otherwise, it
@@ -64,6 +64,7 @@ pub enum AccessError {
 ///
 /// [`ChannelMonitor`]: ../ln/channelmonitor/struct.ChannelMonitor.html
 /// [`ChannelMonitorUpdateErr`]: ../ln/channelmonitor/enum.ChannelMonitorUpdateErr.html
+/// [`PermanentFailure`]: ../ln/channelmonitor/enum.ChannelMonitorUpdateErr.html#variant.PermanentFailure
 pub trait Watch: Send + Sync {
 	/// Keys needed by monitors for creating and signing transactions.
 	type Keys: ChannelKeys;
