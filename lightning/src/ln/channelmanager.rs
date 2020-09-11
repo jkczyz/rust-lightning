@@ -3172,7 +3172,7 @@ impl<ChanSigner: ChannelKeys, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> 
 	}
 
 	/// We force-close the channel without letting our counterparty participate in the shutdown
-	pub fn block_disconnected(&self, header: &BlockHeader, _: u32) {
+	pub fn block_disconnected(&self, header: &BlockHeader) {
 		let _ = self.total_consistency_lock.read().unwrap();
 		let mut failed_channels = Vec::new();
 		{
