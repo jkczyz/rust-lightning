@@ -56,9 +56,11 @@ pub enum AccessError {
 /// If an implementation maintains multiple instances of a channel's monitor (e.g., by using a
 /// watchtower), then it must ensure that updates are applied across all instances. Otherwise, it
 /// could result in a revoked transaction being broadcast, allowing the counterparty to claim all
-/// funds in the channel.
+/// funds in the channel. See [`ChannelMonitorUpdateErr`] for more details about how to handle
+/// multiple instances.
 ///
 /// [`ChannelMonitor`]: ../ln/channelmonitor/struct.ChannelMonitor.html
+/// [`ChannelMonitorUpdateErr`]: ../ln/channelmonitor/enum.ChannelMonitorUpdateErr.html
 pub trait Watch: Send + Sync {
 	/// Keys needed by monitors for creating and signing transactions.
 	type Keys: ChannelKeys;
