@@ -53,8 +53,8 @@ pub enum AccessError {
 ///
 /// TODO: Add documentation about persisting monitors.
 ///
-/// If an implementation maintains multiple instances of a channel's monitor (e.g., by using a
-/// watchtower), then it must ensure that updates are applied across all instances. Otherwise, it
+/// If an implementation maintains multiple instances of a channel's monitor (e.g., by storing
+/// backup copies), then it must ensure that updates are applied across all instances. Otherwise, it
 /// could result in a revoked transaction being broadcast, allowing the counterparty to claim all
 /// funds in the channel. See [`ChannelMonitorUpdateErr`] for more details about how to handle
 /// multiple instances.
