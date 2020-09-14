@@ -100,7 +100,13 @@ pub trait Watch: Send + Sync {
 ///
 /// This is useful in order to have a [`Watch`] implementation convey to a chain source which
 /// transactions to be notified of. Notifying may take the form of pre-filtering blocks or, in the
-/// case of [BIP 157]/[BIP 158], only fetching a block if the compact filter matches.
+/// case of [BIP 157]/[BIP 158], only fetching a block if the compact filter matches. After a
+/// transaction or an output has been registered, subsequent block retrievals from the chain source
+/// must not exclude any transactions matching the new criteria.
+///
+/// Note that use as part of a [`Watch`] implementation involves reentrancy. Therefore, these
+/// functions should not block on I/O. Implementations should instead queue the newly monitored data
+/// to be processed after the functions have returned.
 ///
 /// [`Watch`]: trait.Watch.html
 /// [BIP 157]: https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki
