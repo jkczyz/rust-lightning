@@ -288,7 +288,8 @@ impl<ChanSigner: ChannelKeys, C: Deref, T: Deref, F: Deref, L: Deref> ChainMonit
 	/// be returned by [`chain::Watch::release_pending_monitor_events`].
 	///
 	/// Calls back to [`chain::Filter`] if any monitor indicated new outputs to watch, returning
-	/// `true` if so.
+	/// `true` if so. In this case, if providing pre-filtered blocks, the caller should re-fetch the
+	/// block to obtain updated `txdata` and recall `block_connected`.
 	///
 	/// [`ChannelMonitor::block_connected`]: struct.ChannelMonitor.html#method.block_connected
 	/// [`chain::Watch::release_pending_monitor_events`]: ../../chain/trait.Watch.html#tymethod.release_pending_monitor_events
