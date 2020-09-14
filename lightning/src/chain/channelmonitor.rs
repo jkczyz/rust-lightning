@@ -1874,8 +1874,10 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 
 	/// Determines if any HTLCs have been resolved on chain in the connected block.
 	///
-	/// Returns any new outputs to watch from `txdata`. After called, these are also included in
-	/// [`get_outputs_to_watch`].
+	/// Returns any new outputs to watch from `txdata`; after called, these are also included in
+	/// [`get_outputs_to_watch`]. If new outputs were returned, callers must rescan the block before
+	/// connecting the next block. However, processing channel-provided updates between rescans is
+	/// allowed.
 	///
 	/// [`get_outputs_to_watch`]: #method.get_outputs_to_watch
 	pub fn block_connected<B: Deref, F: Deref, L: Deref>(&mut self, header: &BlockHeader, txdata: &[(usize, &Transaction)], height: u32, broadcaster: B, fee_estimator: F, logger: L)-> Vec<(Txid, Vec<TxOut>)>
