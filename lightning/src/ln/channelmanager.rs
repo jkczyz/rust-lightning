@@ -3060,6 +3060,10 @@ impl<ChanSigner: ChannelKeys, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> 
         L::Target: Logger,
 {
 	/// Updates channel state based on transactions seen in a connected block.
+	///
+	/// Unlike [`ChannelMonitor::block_connected`], this function does not require any rescan logic.
+	///
+	/// [`ChannelMonitor::block_connected`]: struct.ChannelMonitor.html#method.block_connected
 	pub fn block_connected(&self, header: &BlockHeader, txdata: &[(usize, &Transaction)], height: u32) {
 		let header_hash = header.block_hash();
 		log_trace!(self.logger, "Block {} at height {} connected", header_hash, height);
