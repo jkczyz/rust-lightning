@@ -1951,6 +1951,8 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 		self.onchain_tx_handler.block_connected(txn_matched, claimable_outpoints, height, &*broadcaster, &*fee_estimator, &*logger);
 		self.last_block_hash = block_hash;
 
+		// Determine new outputs to watch by comparing against previously known outputs to watch,
+		// updating the latter in the process.
 		watch_outputs.retain(|&(ref txid, ref txouts)| {
 			let output_scripts = txouts.iter().map(|o| o.script_pubkey.clone()).collect();
 			self.outputs_to_watch.insert(txid.clone(), output_scripts).is_none()
