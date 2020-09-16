@@ -1883,8 +1883,7 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 		      F::Target: FeeEstimator,
 					L::Target: Logger,
 	{
-		let txn_matched = &txdata.iter().filter(|&&(_, tx)| self.is_relevant_tx(tx)).map(|e| *e).collect::<Vec<_>>();
-		for &(_, tx) in txn_matched {
+		for &(_, tx) in txdata {
 			let mut output_val = 0;
 			for out in tx.output.iter() {
 				if out.value > 21_000_000_0000_0000 { panic!("Value-overflowing transaction provided to block connected"); }
@@ -1893,12 +1892,14 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 			}
 		}
 
-		let block_hash = header.block_hash();
-		log_trace!(logger, "Block {} at height {} connected with {} txn matched", block_hash, height, txn_matched.len());
-
+		let mut txn_matched = Vec::new();
 		let mut watch_outputs = Vec::new();
 		let mut claimable_outpoints = Vec::new();
-		for &(_, tx) in txn_matched {
+		for &(idx, tx) in txdata {
+			if !self.is_relevant_tx(tx) { continue; }
+			txn_matched.push((idx, tx));
+
+			let mut new_watch_outputs = Vec::new();
 			if tx.input.len() == 1 {
 				// Assuming our keys were not leaked (in which case we're screwed no matter what),
 				// commitment transactions and HTLC transactions will all only ever have one input,
@@ -1909,12 +1910,12 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 					if (tx.input[0].sequence >> 8*3) as u8 == 0x80 && (tx.lock_time >> 8*3) as u8 == 0x20 {
 						let (mut new_outpoints, new_outputs) = self.check_spend_remote_transaction(&tx, height, &logger);
 						if !new_outputs.1.is_empty() {
-							watch_outputs.push(new_outputs);
+							new_watch_outputs.push(new_outputs);
 						}
 						if new_outpoints.is_empty() {
 							let (mut new_outpoints, new_outputs) = self.check_spend_local_transaction(&tx, height, &logger);
 							if !new_outputs.1.is_empty() {
-								watch_outputs.push(new_outputs);
+								new_watch_outputs.push(new_outputs);
 							}
 							claimable_outpoints.append(&mut new_outpoints);
 						}
@@ -1925,11 +1926,20 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 						let (mut new_outpoints, new_outputs_option) = self.check_spend_remote_htlc(&tx, commitment_number, height, &logger);
 						claimable_outpoints.append(&mut new_outpoints);
 						if let Some(new_outputs) = new_outputs_option {
-							watch_outputs.push(new_outputs);
+							new_watch_outputs.push(new_outputs);
 						}
 					}
 				}
 			}
+
+			// Determine new outputs to watch by comparing against previously known outputs to watch,
+			// updating the latter in the process.
+			new_watch_outputs.retain(|&(ref txid, ref txouts)| {
+				let output_scripts = txouts.iter().map(|o| o.script_pubkey.clone()).collect();
+				self.outputs_to_watch.insert(txid.clone(), output_scripts).is_none()
+			});
+			watch_outputs.append(&mut new_watch_outputs);
+
 			// While all commitment/HTLC-Success/HTLC-Timeout transactions have one input, HTLCs
 			// can also be resolved in a few other ways which can have more than one output. Thus,
 			// we call is_resolving_htlc_output here outside of the tx.input.len() == 1 check.
@@ -1937,6 +1947,10 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 
 			self.is_paying_spendable_output(&tx, height, &logger);
 		}
+
+		let block_hash = header.block_hash();
+		log_trace!(logger, "Block {} at height {} connected with {} txn matched", block_hash, height, txn_matched.len());
+
 		let should_broadcast = self.would_broadcast_at_height(height, &logger);
 		if should_broadcast {
 			claimable_outpoints.push(ClaimRequest { absolute_timelock: height, aggregable: false, outpoint: BitcoinOutPoint { txid: self.funding_info.0.txid.clone(), vout: self.funding_info.0.index as u32 }, witness_data: InputMaterial::Funding { funding_redeemscript: self.funding_redeemscript.clone() }});
@@ -1973,15 +1987,9 @@ impl<ChanSigner: ChannelKeys> ChannelMonitor<ChanSigner> {
 			}
 		}
 
-		self.onchain_tx_handler.block_connected(txn_matched, claimable_outpoints, height, &*broadcaster, &*fee_estimator, &*logger);
+		self.onchain_tx_handler.block_connected(&txn_matched, claimable_outpoints, height, &*broadcaster, &*fee_estimator, &*logger);
 		self.last_block_hash = block_hash;
 
-		// Determine new outputs to watch by comparing against previously known outputs to watch,
-		// updating the latter in the process.
-		watch_outputs.retain(|&(ref txid, ref txouts)| {
-			let output_scripts = txouts.iter().map(|o| o.script_pubkey.clone()).collect();
-			self.outputs_to_watch.insert(txid.clone(), output_scripts).is_none()
-		});
 		watch_outputs
 	}
 
