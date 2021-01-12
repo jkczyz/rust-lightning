@@ -1,0 +1,146 @@
+use crate::http::{HttpClient, HttpEndpoint, JsonResponse};
+
+use base64;
+use serde_json;
+
+use std::convert::TryFrom;
+use std::convert::TryInto;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// A simple RPC client for calling methods using HTTP `POST`.
+pub struct RPCClient {
+	basic_auth: String,
+	endpoint: HttpEndpoint,
+	id: AtomicUsize,
+}
+
+impl RPCClient {
+	pub fn new(user_auth: &str, endpoint: HttpEndpoint) -> Self {
+		Self {
+			basic_auth: "Basic ".to_string() + &base64::encode(user_auth),
+			endpoint,
+			id: AtomicUsize::new(0),
+		}
+	}
+
+	/// Calls a method with the response encoded in JSON format and interpreted as type `T`.
+	async fn call_method<T>(&self, method: &str, params: &[serde_json::Value]) -> std::io::Result<T>
+	where JsonResponse: TryFrom<Vec<u8>, Error = std::io::Error> + TryInto<T, Error = std::io::Error> {
+		let host = format!("{}:{}", self.endpoint.host(), self.endpoint.port());
+		let uri = self.endpoint.path();
+		let content = serde_json::json!({
+			"method": method,
+			"params": params,
+			"id": &self.id.fetch_add(1, Ordering::AcqRel).to_string()
+		});
+
+		let mut client = HttpClient::connect(&self.endpoint)?;
+		let mut response = client.post::<JsonResponse>(&uri, &host, &self.basic_auth, content).await?.0;
+		if !response.is_object() {
+			return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "expected JSON object"));
+		}
+
+		let error = &response["error"];
+		if !error.is_null() {
+			// TODO: Examine error code for a more precise std::io::ErrorKind.
+			let message = error["message"].as_str().unwrap_or("unknown error");
+			return Err(std::io::Error::new(std::io::ErrorKind::Other, message));
+		}
+
+		let result = &mut response["result"];
+		if result.is_null() {
+			return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "expected JSON result"));
+		}
+
+		JsonResponse(result.take()).try_into()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::http::client_tests::{HttpServer, MessageBody};
+
+	/// Converts a JSON value into `u64`.
+	impl TryInto<u64> for JsonResponse {
+		type Error = std::io::Error;
+
+		fn try_into(self) -> std::io::Result<u64> {
+			match self.0.as_u64() {
+				None => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number")),
+				Some(n) => Ok(n),
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn call_method_returning_unknown_response() {
+		let server = HttpServer::responding_with_not_found();
+		let client = RPCClient::new("credentials", server.endpoint());
+
+		match client.call_method::<u64>("getblockcount", &[]).await {
+			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
+			Ok(_) => panic!("Expected error"),
+		}
+	}
+
+	#[tokio::test]
+	async fn call_method_returning_malfomred_response() {
+		let response = serde_json::json!("foo");
+		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
+		let client = RPCClient::new("credentials", server.endpoint());
+
+		match client.call_method::<u64>("getblockcount", &[]).await {
+			Err(e) => {
+				assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+				assert_eq!(e.get_ref().unwrap().to_string(), "expected JSON object");
+			},
+			Ok(_) => panic!("Expected error"),
+		}
+	}
+
+	#[tokio::test]
+	async fn call_method_returning_error() {
+		let response = serde_json::json!({
+			"error": { "code": -8, "message": "invalid parameter" },
+		});
+		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
+		let client = RPCClient::new("credentials", server.endpoint());
+
+		let invalid_block_hash = serde_json::json!("foo");
+		match client.call_method::<u64>("getblock", &[invalid_block_hash]).await {
+			Err(e) => {
+				assert_eq!(e.kind(), std::io::ErrorKind::Other);
+				assert_eq!(e.get_ref().unwrap().to_string(), "invalid parameter");
+			},
+			Ok(_) => panic!("Expected error"),
+		}
+	}
+
+	#[tokio::test]
+	async fn call_method_returning_missing_result() {
+		let response = serde_json::json!({ "result": null });
+		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
+		let client = RPCClient::new("credentials", server.endpoint());
+
+		match client.call_method::<u64>("getblockcount", &[]).await {
+			Err(e) => {
+				assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+				assert_eq!(e.get_ref().unwrap().to_string(), "expected JSON result");
+			},
+			Ok(_) => panic!("Expected error"),
+		}
+	}
+
+	#[tokio::test]
+	async fn call_method_returning_valid_result() {
+		let response = serde_json::json!({ "result": 654470 });
+		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
+		let client = RPCClient::new("credentials", server.endpoint());
+
+		match client.call_method::<u64>("getblockcount", &[]).await {
+			Err(e) => panic!("Unexpected error: {:?}", e),
+			Ok(count) => assert_eq!(count, 654470),
+		}
+	}
+}
