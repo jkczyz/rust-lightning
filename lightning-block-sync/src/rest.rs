@@ -1,4 +1,9 @@
-use crate::http::{HttpEndpoint, HttpClient};
+use crate::{BlockHeaderData, BlockSource, AsyncBlockSourceResult};
+use crate::http::{BinaryResponse, HttpEndpoint, HttpClient, JsonResponse};
+
+use bitcoin::blockdata::block::Block;
+use bitcoin::hash_types::BlockHash;
+use bitcoin::hashes::hex::ToHex;
 
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -22,6 +27,28 @@ impl RestClient {
 		let host = format!("{}:{}", self.endpoint.host(), self.endpoint.port());
 		let uri = format!("{}/{}", self.endpoint.path().trim_end_matches("/"), resource_path);
 		self.client.get::<F>(&uri, &host).await?.try_into()
+	}
+}
+
+impl BlockSource for RestClient {
+	fn get_header<'a>(&'a mut self, header_hash: &'a BlockHash, _height: Option<u32>) -> AsyncBlockSourceResult<'a, BlockHeaderData> {
+		Box::pin(async move {
+			let resource_path = format!("headers/1/{}.json", header_hash.to_hex());
+			Ok(self.request_resource::<JsonResponse, _>(&resource_path).await?)
+		})
+	}
+
+	fn get_block<'a>(&'a mut self, header_hash: &'a BlockHash) -> AsyncBlockSourceResult<'a, Block> {
+		Box::pin(async move {
+			let resource_path = format!("block/{}.bin", header_hash.to_hex());
+			Ok(self.request_resource::<BinaryResponse, _>(&resource_path).await?)
+		})
+	}
+
+	fn get_best_block<'a>(&'a mut self) -> AsyncBlockSourceResult<'a, (BlockHash, Option<u32>)> {
+		Box::pin(async move {
+			Ok(self.request_resource::<JsonResponse, _>("chaininfo.json").await?)
+		})
 	}
 }
 
