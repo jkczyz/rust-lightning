@@ -6,21 +6,21 @@ use std::convert::TryInto;
 /// A simple REST client for requesting resources using HTTP `GET`.
 pub struct RESTClient {
 	endpoint: HttpEndpoint,
+	client: HttpClient,
 }
 
 impl RESTClient {
-	pub fn new(endpoint: HttpEndpoint) -> Self {
-		Self { endpoint }
+	pub fn new(endpoint: HttpEndpoint) -> std::io::Result<Self> {
+		let client = HttpClient::connect(&endpoint)?;
+		Ok(Self { endpoint, client })
 	}
 
 	/// Requests a resource encoded in `F` format and interpreted as type `T`.
-	async fn request_resource<F, T>(&self, resource_path: &str) -> std::io::Result<T>
+	async fn request_resource<F, T>(&mut self, resource_path: &str) -> std::io::Result<T>
 	where F: TryFrom<Vec<u8>, Error = std::io::Error> + TryInto<T, Error = std::io::Error> {
 		let host = format!("{}:{}", self.endpoint.host(), self.endpoint.port());
 		let uri = format!("{}/{}", self.endpoint.path().trim_end_matches("/"), resource_path);
-
-		let mut client = HttpClient::connect(&self.endpoint)?;
-		client.get::<F>(&uri, &host).await?.try_into()
+		self.client.get::<F>(&uri, &host).await?.try_into()
 	}
 }
 
@@ -48,7 +48,7 @@ mod tests {
 	#[tokio::test]
 	async fn request_unknown_resource() {
 		let server = HttpServer::responding_with_not_found();
-		let client = RESTClient::new(server.endpoint());
+		let mut client = RESTClient::new(server.endpoint()).unwrap();
 
 		match client.request_resource::<BinaryResponse, u32>("/").await {
 			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
@@ -59,7 +59,7 @@ mod tests {
 	#[tokio::test]
 	async fn request_malformed_resource() {
 		let server = HttpServer::responding_with_ok(MessageBody::Content("foo"));
-		let client = RESTClient::new(server.endpoint());
+		let mut client = RESTClient::new(server.endpoint()).unwrap();
 
 		match client.request_resource::<BinaryResponse, u32>("/").await {
 			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::InvalidData),
@@ -70,7 +70,7 @@ mod tests {
 	#[tokio::test]
 	async fn request_valid_resource() {
 		let server = HttpServer::responding_with_ok(MessageBody::Content(42));
-		let client = RESTClient::new(server.endpoint());
+		let mut client = RESTClient::new(server.endpoint()).unwrap();
 
 		match client.request_resource::<BinaryResponse, u32>("/").await {
 			Err(e) => panic!("Unexpected error: {:?}", e),

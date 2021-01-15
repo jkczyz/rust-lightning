@@ -11,20 +11,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub struct RPCClient {
 	basic_auth: String,
 	endpoint: HttpEndpoint,
+	client: HttpClient,
 	id: AtomicUsize,
 }
 
 impl RPCClient {
-	pub fn new(user_auth: &str, endpoint: HttpEndpoint) -> Self {
-		Self {
+	pub fn new(user_auth: &str, endpoint: HttpEndpoint) -> std::io::Result<Self> {
+		let client = HttpClient::connect(&endpoint)?;
+		Ok(Self {
 			basic_auth: "Basic ".to_string() + &base64::encode(user_auth),
 			endpoint,
+			client,
 			id: AtomicUsize::new(0),
-		}
+		})
 	}
 
 	/// Calls a method with the response encoded in JSON format and interpreted as type `T`.
-	async fn call_method<T>(&self, method: &str, params: &[serde_json::Value]) -> std::io::Result<T>
+	async fn call_method<T>(&mut self, method: &str, params: &[serde_json::Value]) -> std::io::Result<T>
 	where JsonResponse: TryFrom<Vec<u8>, Error = std::io::Error> + TryInto<T, Error = std::io::Error> {
 		let host = format!("{}:{}", self.endpoint.host(), self.endpoint.port());
 		let uri = self.endpoint.path();
@@ -34,8 +37,8 @@ impl RPCClient {
 			"id": &self.id.fetch_add(1, Ordering::AcqRel).to_string()
 		});
 
-		let mut client = HttpClient::connect(&self.endpoint)?;
-		let mut response = client.post::<JsonResponse>(&uri, &host, &self.basic_auth, content).await?.0;
+		let mut response = self.client.post::<JsonResponse>(&uri, &host, &self.basic_auth, content)
+			.await?.0;
 		if !response.is_object() {
 			return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "expected JSON object"));
 		}
@@ -76,7 +79,7 @@ mod tests {
 	#[tokio::test]
 	async fn call_method_returning_unknown_response() {
 		let server = HttpServer::responding_with_not_found();
-		let client = RPCClient::new("credentials", server.endpoint());
+		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
 
 		match client.call_method::<u64>("getblockcount", &[]).await {
 			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
@@ -88,7 +91,7 @@ mod tests {
 	async fn call_method_returning_malfomred_response() {
 		let response = serde_json::json!("foo");
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
-		let client = RPCClient::new("credentials", server.endpoint());
+		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
 
 		match client.call_method::<u64>("getblockcount", &[]).await {
 			Err(e) => {
@@ -105,7 +108,7 @@ mod tests {
 			"error": { "code": -8, "message": "invalid parameter" },
 		});
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
-		let client = RPCClient::new("credentials", server.endpoint());
+		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
 
 		let invalid_block_hash = serde_json::json!("foo");
 		match client.call_method::<u64>("getblock", &[invalid_block_hash]).await {
@@ -121,7 +124,7 @@ mod tests {
 	async fn call_method_returning_missing_result() {
 		let response = serde_json::json!({ "result": null });
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
-		let client = RPCClient::new("credentials", server.endpoint());
+		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
 
 		match client.call_method::<u64>("getblockcount", &[]).await {
 			Err(e) => {
@@ -136,7 +139,7 @@ mod tests {
 	async fn call_method_returning_valid_result() {
 		let response = serde_json::json!({ "result": 654470 });
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
-		let client = RPCClient::new("credentials", server.endpoint());
+		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
 
 		match client.call_method::<u64>("getblockcount", &[]).await {
 			Err(e) => panic!("Unexpected error: {:?}", e),

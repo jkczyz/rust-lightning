@@ -141,9 +141,8 @@ impl HttpClient {
 			 Host: {}\r\n\
 			 Connection: keep-alive\r\n\
 			 \r\n", uri, host);
-		self.write_request(request).await?;
-		let bytes = self.read_response().await?;
-		F::try_from(bytes)
+		let response_body = self.send_request_with_retry(&request).await?;
+		F::try_from(response_body)
 	}
 
 	/// Sends a `POST` request for a resource identified by `uri` at the `host` using the given HTTP
@@ -164,13 +163,37 @@ impl HttpClient {
 			 Content-Length: {}\r\n\
 			 \r\n\
 			 {}", uri, host, auth, content.len(), content);
+		let response_body = self.send_request_with_retry(&request).await?;
+		F::try_from(response_body)
+	}
+
+	/// Sends an HTTP request message and reads the response, returning its body. Attempts to
+	/// reconnect and retry if the connection has been closed.
+	async fn send_request_with_retry(&mut self, request: &str) -> std::io::Result<Vec<u8>> {
+		let endpoint = self.stream.peer_addr().unwrap();
+		match self.send_request(request).await {
+			Ok(bytes) => Ok(bytes),
+			Err(e) => match e.kind() {
+				std::io::ErrorKind::ConnectionReset |
+				std::io::ErrorKind::ConnectionAborted |
+				std::io::ErrorKind::UnexpectedEof => {
+					// Reconnect if the connection was closed.
+					*self = Self::connect(endpoint)?;
+					self.send_request(request).await
+				},
+				_ => Err(e),
+			},
+		}
+	}
+
+	/// Sends an HTTP request message and reads the response, returning its body.
+	async fn send_request(&mut self, request: &str) -> std::io::Result<Vec<u8>> {
 		self.write_request(request).await?;
-		let bytes = self.read_response().await?;
-		F::try_from(bytes)
+		self.read_response().await
 	}
 
 	/// Writes an HTTP request message.
-	async fn write_request(&mut self, request: String) -> std::io::Result<()> {
+	async fn write_request(&mut self, request: &str) -> std::io::Result<()> {
 		#[cfg(feature = "tokio")]
 		{
 			self.stream.write_all(request.as_bytes()).await?;
@@ -216,14 +239,14 @@ impl HttpClient {
 
 		// Read and parse status line
 		let status_line = read_line!()
-			.ok_or(std::io::Error::new(std::io::ErrorKind::InvalidData, "no status line"))?;
+			.ok_or(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no status line"))?;
 		let status = HttpStatus::parse(&status_line)?;
 
 		// Read and parse relevant headers
 		let mut message_length = HttpMessageLength::Empty;
 		loop {
 			let line = read_line!()
-				.ok_or(std::io::Error::new(std::io::ErrorKind::InvalidData, "unexpected eof"))?;
+				.ok_or(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no headers"))?;
 			if line.is_empty() { break; }
 
 			let header = HttpHeader::parse(&line)?;
@@ -514,21 +537,23 @@ pub(crate) mod client_tests {
 			let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 			let shutdown_signaled = std::sync::Arc::clone(&shutdown);
 			let handler = std::thread::spawn(move || {
-				let (mut stream, _) = listener.accept().unwrap();
-				stream.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
+				for stream in listener.incoming() {
+					let mut stream = stream.unwrap();
+					stream.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
 
-				let lines_read = std::io::BufReader::new(&stream)
-					.lines()
-					.take_while(|line| !line.as_ref().unwrap().is_empty())
-					.count();
-				if lines_read == 0 { return; }
+					let lines_read = std::io::BufReader::new(&stream)
+						.lines()
+						.take_while(|line| !line.as_ref().unwrap().is_empty())
+						.count();
+					if lines_read == 0 { continue; }
 
-				for chunk in response.as_bytes().chunks(16) {
-					if shutdown_signaled.load(std::sync::atomic::Ordering::SeqCst) {
-						break;
-					} else {
-						stream.write(chunk).unwrap();
-						stream.flush().unwrap();
+					for chunk in response.as_bytes().chunks(16) {
+						if shutdown_signaled.load(std::sync::atomic::Ordering::SeqCst) {
+							return;
+						} else {
+							stream.write(chunk).unwrap();
+							stream.flush().unwrap();
+						}
 					}
 				}
 			});
@@ -589,7 +614,7 @@ pub(crate) mod client_tests {
 		drop(server);
 		match client.get::<BinaryResponse>("/foo", "foo.com").await {
 			Err(e) => {
-				assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+				assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof);
 				assert_eq!(e.get_ref().unwrap().to_string(), "no status line");
 			},
 			Ok(_) => panic!("Expected error"),
@@ -604,8 +629,8 @@ pub(crate) mod client_tests {
 		drop(server);
 		match client.get::<BinaryResponse>("/foo", "foo.com").await {
 			Err(e) => {
-				assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
-				assert_eq!(e.get_ref().unwrap().to_string(), "unexpected eof");
+				assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof);
+				assert_eq!(e.get_ref().unwrap().to_string(), "no headers");
 			},
 			Ok(_) => panic!("Expected error"),
 		}
@@ -622,8 +647,8 @@ pub(crate) mod client_tests {
 		let mut client = HttpClient::connect(&server.endpoint()).unwrap();
 		match client.get::<BinaryResponse>("/foo", "foo.com").await {
 			Err(e) => {
-				assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
-				assert_eq!(e.get_ref().unwrap().to_string(), "unexpected eof");
+				assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof);
+				assert_eq!(e.get_ref().unwrap().to_string(), "no headers");
 			},
 			Ok(_) => panic!("Expected error"),
 		}
@@ -698,6 +723,18 @@ pub(crate) mod client_tests {
 		match client.get::<BinaryResponse>("/foo", "foo.com").await {
 			Err(e) => panic!("Unexpected error: {:?}", e),
 			Ok(bytes) => assert_eq!(bytes.0, body.as_bytes()),
+		}
+	}
+
+	#[tokio::test]
+	async fn reconnect_closed_connection() {
+		let server = HttpServer::responding_with_ok::<String>(MessageBody::Empty);
+
+		let mut client = HttpClient::connect(&server.endpoint()).unwrap();
+		assert!(client.get::<BinaryResponse>("/foo", "foo.com").await.is_ok());
+		match client.get::<BinaryResponse>("/foo", "foo.com").await {
+			Err(e) => panic!("Unexpected error: {:?}", e),
+			Ok(bytes) => assert_eq!(bytes.0, Vec::<u8>::new()),
 		}
 	}
 
