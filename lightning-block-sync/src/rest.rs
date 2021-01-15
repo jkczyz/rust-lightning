@@ -10,6 +10,7 @@ pub struct RestClient {
 }
 
 impl RestClient {
+	/// Creates a new REST client connected to the given endpoint.
 	pub fn new(endpoint: HttpEndpoint) -> std::io::Result<Self> {
 		let client = HttpClient::connect(&endpoint)?;
 		Ok(Self { endpoint, client })
