@@ -35,10 +35,9 @@ pub trait BlockSource : Sync + Send {
 /// Result type for `BlockSource` requests.
 type BlockSourceResult<T> = Result<T, BlockSourceError>;
 
+// TODO: Replace with BlockSourceResult once `async` trait functions are supported. For details,
+// see: https://areweasyncyet.rs.
 /// Result type for asynchronous `BlockSource` requests.
-///
-/// TODO: Replace with BlockSourceResult once `async` trait functions are supported. For details,
-/// see: https://areweasyncyet.rs.
 type AsyncBlockSourceResult<'a, T> = Pin<Box<dyn Future<Output = BlockSourceResult<T>> + 'a + Send>>;
 
 /// Error type for `BlockSource` requests.
