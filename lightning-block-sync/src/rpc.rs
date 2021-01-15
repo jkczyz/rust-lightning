@@ -8,14 +8,14 @@ use std::convert::TryInto;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A simple RPC client for calling methods using HTTP `POST`.
-pub struct RPCClient {
+pub struct RpcClient {
 	basic_auth: String,
 	endpoint: HttpEndpoint,
 	client: HttpClient,
 	id: AtomicUsize,
 }
 
-impl RPCClient {
+impl RpcClient {
 	pub fn new(user_auth: &str, endpoint: HttpEndpoint) -> std::io::Result<Self> {
 		let client = HttpClient::connect(&endpoint)?;
 		Ok(Self {
@@ -79,7 +79,7 @@ mod tests {
 	#[tokio::test]
 	async fn call_method_returning_unknown_response() {
 		let server = HttpServer::responding_with_not_found();
-		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
+		let mut client = RpcClient::new("credentials", server.endpoint()).unwrap();
 
 		match client.call_method::<u64>("getblockcount", &[]).await {
 			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
@@ -91,7 +91,7 @@ mod tests {
 	async fn call_method_returning_malfomred_response() {
 		let response = serde_json::json!("foo");
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
-		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
+		let mut client = RpcClient::new("credentials", server.endpoint()).unwrap();
 
 		match client.call_method::<u64>("getblockcount", &[]).await {
 			Err(e) => {
@@ -108,7 +108,7 @@ mod tests {
 			"error": { "code": -8, "message": "invalid parameter" },
 		});
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
-		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
+		let mut client = RpcClient::new("credentials", server.endpoint()).unwrap();
 
 		let invalid_block_hash = serde_json::json!("foo");
 		match client.call_method::<u64>("getblock", &[invalid_block_hash]).await {
@@ -124,7 +124,7 @@ mod tests {
 	async fn call_method_returning_missing_result() {
 		let response = serde_json::json!({ "result": null });
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
-		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
+		let mut client = RpcClient::new("credentials", server.endpoint()).unwrap();
 
 		match client.call_method::<u64>("getblockcount", &[]).await {
 			Err(e) => {
@@ -139,7 +139,7 @@ mod tests {
 	async fn call_method_returning_valid_result() {
 		let response = serde_json::json!({ "result": 654470 });
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
-		let mut client = RPCClient::new("credentials", server.endpoint()).unwrap();
+		let mut client = RpcClient::new("credentials", server.endpoint()).unwrap();
 
 		match client.call_method::<u64>("getblockcount", &[]).await {
 			Err(e) => panic!("Unexpected error: {:?}", e),

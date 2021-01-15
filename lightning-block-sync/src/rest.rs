@@ -4,12 +4,12 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 
 /// A simple REST client for requesting resources using HTTP `GET`.
-pub struct RESTClient {
+pub struct RestClient {
 	endpoint: HttpEndpoint,
 	client: HttpClient,
 }
 
-impl RESTClient {
+impl RestClient {
 	pub fn new(endpoint: HttpEndpoint) -> std::io::Result<Self> {
 		let client = HttpClient::connect(&endpoint)?;
 		Ok(Self { endpoint, client })
@@ -48,7 +48,7 @@ mod tests {
 	#[tokio::test]
 	async fn request_unknown_resource() {
 		let server = HttpServer::responding_with_not_found();
-		let mut client = RESTClient::new(server.endpoint()).unwrap();
+		let mut client = RestClient::new(server.endpoint()).unwrap();
 
 		match client.request_resource::<BinaryResponse, u32>("/").await {
 			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
@@ -59,7 +59,7 @@ mod tests {
 	#[tokio::test]
 	async fn request_malformed_resource() {
 		let server = HttpServer::responding_with_ok(MessageBody::Content("foo"));
-		let mut client = RESTClient::new(server.endpoint()).unwrap();
+		let mut client = RestClient::new(server.endpoint()).unwrap();
 
 		match client.request_resource::<BinaryResponse, u32>("/").await {
 			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::InvalidData),
@@ -70,7 +70,7 @@ mod tests {
 	#[tokio::test]
 	async fn request_valid_resource() {
 		let server = HttpServer::responding_with_ok(MessageBody::Content(42));
-		let mut client = RESTClient::new(server.endpoint()).unwrap();
+		let mut client = RestClient::new(server.endpoint()).unwrap();
 
 		match client.request_resource::<BinaryResponse, u32>("/").await {
 			Err(e) => panic!("Unexpected error: {:?}", e),
