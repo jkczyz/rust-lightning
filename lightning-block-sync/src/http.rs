@@ -21,8 +21,8 @@ use std::net::TcpStream;
 /// Maximum HTTP message header size in bytes.
 const MAX_HTTP_MESSAGE_HEADER_SIZE: usize = 8192;
 
-/// Maximum HTTP message body size in bytes.
-const MAX_HTTP_MESSAGE_BODY_SIZE: usize = 4_000_000;
+/// Maximum HTTP message body size in bytes. Enough for a hex-encoded block in JSON format.
+const MAX_HTTP_MESSAGE_BODY_SIZE: usize = 2 * 4_000_000 + 64;
 
 /// Endpoint for interacting with an HTTP-based API.
 #[derive(Debug)]
