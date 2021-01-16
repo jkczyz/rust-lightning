@@ -14,21 +14,21 @@ use std::pin::Pin;
 
 /// Abstract type for retrieving block headers and data.
 pub trait BlockSource : Sync + Send {
-	/// Returns the header for a given hash. A height hint may be provided in case a source cannot
-	/// easily find headers based on a hash. This is merely a hint and thus the returned header must
-	/// have the same hash as was requested. Otherwise, an error must be returned.
+	/// Returns the header for a given hash. A height hint may be provided in case a block source
+	/// cannot easily find headers based on a hash. This is merely a hint and thus the returned
+	/// header must have the same hash as was requested. Otherwise, an error must be returned.
 	///
 	/// Implementations that cannot find headers based on the hash should return a `Transient` error
-	/// when `height_hint` is `None`. In such a case, `get_best_block` should never return `None`
-	/// for the height. Otherwise, the source could not be used independently for an initial sync.
+	/// when `height_hint` is `None`.
 	fn get_header<'a>(&'a mut self, header_hash: &'a BlockHash, height_hint: Option<u32>) -> AsyncBlockSourceResult<'a, BlockHeaderData>;
 
 	/// Returns the block for a given hash. A headers-only block source should return a `Transient`
 	/// error.
 	fn get_block<'a>(&'a mut self, header_hash: &'a BlockHash) -> AsyncBlockSourceResult<'a, Block>;
 
-	/// Returns the hash of the best block and, optionally, its height. The height is passed to
-	/// `get_header` to allow a more efficient lookup on some block sources.
+	// TODO: Phrase in terms of `Poll` once added.
+	/// Returns the hash of the best block and, optionally, its height. When polling a block source,
+	/// the height is passed to `get_header` to allow for a more efficient lookup.
 	fn get_best_block<'a>(&'a mut self) -> AsyncBlockSourceResult<(BlockHash, Option<u32>)>;
 }
 
