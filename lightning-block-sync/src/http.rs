@@ -612,7 +612,6 @@ pub(crate) mod client_tests {
 		let server = HttpServer::responding_with("".to_string());
 
 		let mut client = HttpClient::connect(&server.endpoint()).unwrap();
-		drop(server);
 		match client.get::<BinaryResponse>("/foo", "foo.com").await {
 			Err(e) => {
 				assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof);
@@ -627,7 +626,6 @@ pub(crate) mod client_tests {
 		let server = HttpServer::responding_with("HTTP/1.1 200 OK".to_string());
 
 		let mut client = HttpClient::connect(&server.endpoint()).unwrap();
-		drop(server);
 		match client.get::<BinaryResponse>("/foo", "foo.com").await {
 			Err(e) => {
 				assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof);
