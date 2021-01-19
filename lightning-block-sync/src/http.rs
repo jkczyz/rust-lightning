@@ -552,8 +552,8 @@ pub(crate) mod client_tests {
 						if shutdown_signaled.load(std::sync::atomic::Ordering::SeqCst) {
 							return;
 						} else {
-							stream.write(chunk).unwrap();
-							stream.flush().unwrap();
+							if let Err(_) = stream.write(chunk) { break; }
+							if let Err(_) = stream.flush() { break; }
 						}
 					}
 				}
