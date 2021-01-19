@@ -75,6 +75,24 @@ jobs:
       - name: Test on Rust ${{ matrix.toolchain }}
         if: "! matrix.build-net-tokio"
         run: cargo test --verbose --color always  -p lightning
+      - name: Test Block Sync Clients on Rust ${{ matrix.toolchain }} with features
+        if: "matrix.build-net-tokio && !matrix.coverage"
+        run: |
+          cd lightning-block-sync
+          cargo test --verbose --color always --features rest-client
+          cargo test --verbose --color always --features rpc-client
+          cargo test --verbose --color always --features rpc-client,rest-client
+          cargo test --verbose --color always --features rpc-client,rest-client,tokio
+          cd ..
+      - name: Test Block Sync Clients on Rust ${{ matrix.toolchain }} with features and full code-linking for coverage generation
+        if: matrix.coverage
+        run: |
+          cd lightning-block-sync
+          RUSTFLAGS="-C link-dead-code" cargo test --verbose --color always --features rest-client
+          RUSTFLAGS="-C link-dead-code" cargo test --verbose --color always --features rpc-client
+          RUSTFLAGS="-C link-dead-code" cargo test --verbose --color always --features rpc-client,rest-client
+          RUSTFLAGS="-C link-dead-code" cargo test --verbose --color always --features rpc-client,rest-client,tokio
+          cd ..
       - name: Install deps for kcov
         if: matrix.coverage
         run: |
