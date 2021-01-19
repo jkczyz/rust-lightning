@@ -16,6 +16,8 @@ pub struct RestClient {
 
 impl RestClient {
 	/// Creates a new REST client connected to the given endpoint.
+	///
+	/// The endpoint should contain the REST path component (e.g., http://127.0.0.1:8332/rest).
 	pub fn new(endpoint: HttpEndpoint) -> std::io::Result<Self> {
 		let client = HttpClient::connect(&endpoint)?;
 		Ok(Self { endpoint, client })
