@@ -177,7 +177,8 @@ impl HttpClient {
 				std::io::ErrorKind::ConnectionReset |
 				std::io::ErrorKind::ConnectionAborted |
 				std::io::ErrorKind::UnexpectedEof => {
-					// Reconnect if the connection was closed.
+					// Reconnect if the connection was closed. This may happen if the server's
+					// keep-alive limits are reached.
 					*self = Self::connect(endpoint)?;
 					self.send_request(request).await
 				},
