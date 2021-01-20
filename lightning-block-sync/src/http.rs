@@ -267,6 +267,7 @@ impl HttpClient {
 		}
 
 		if !status.is_ok() {
+			// TODO: Handle 3xx redirection responses.
 			return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not found"));
 		}
 
