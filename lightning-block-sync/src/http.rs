@@ -27,34 +27,15 @@ const MAX_HTTP_MESSAGE_BODY_SIZE: usize = 2 * 4_000_000 + 64;
 /// Endpoint for interacting with an HTTP-based API.
 #[derive(Debug)]
 pub struct HttpEndpoint {
-	scheme: Scheme,
 	host: String,
 	port: Option<u16>,
 	path: String,
 }
 
-/// URI scheme compatible with an HTTP endpoint.
-#[derive(Debug)]
-pub enum Scheme {
-	HTTP,
-	HTTPS,
-}
-
 impl HttpEndpoint {
-	/// Creates an endpoint using the HTTP scheme.
-	pub fn insecure_host(host: String) -> Self {
+	/// Creates an endpoint for the given host and default HTTP port.
+	pub fn for_host(host: String) -> Self {
 		Self {
-			scheme: Scheme::HTTP,
-			host,
-			port: None,
-			path: String::from("/"),
-		}
-	}
-
-	/// Creates an endpoint using the HTTPS scheme.
-	pub fn secure_host(host: String) -> Self {
-		Self {
-			scheme: Scheme::HTTPS,
 			host,
 			port: None,
 			path: String::from("/"),
@@ -81,10 +62,7 @@ impl HttpEndpoint {
 	/// Returns the endpoint port.
 	pub fn port(&self) -> u16 {
 		match self.port {
-			None => match self.scheme {
-				Scheme::HTTP => 80,
-				Scheme::HTTPS => 443,
-			},
+			None => 80,
 			Some(port) => port,
 		}
 	}
@@ -422,43 +400,36 @@ mod endpoint_tests {
 	use super::HttpEndpoint;
 
 	#[test]
-	fn to_insecure_host() {
-		let endpoint = HttpEndpoint::insecure_host("foo.com".into());
+	fn with_default_port() {
+		let endpoint = HttpEndpoint::for_host("foo.com".into());
 		assert_eq!(endpoint.host(), "foo.com");
 		assert_eq!(endpoint.port(), 80);
 	}
 
 	#[test]
-	fn to_secure_host() {
-		let endpoint = HttpEndpoint::secure_host("foo.com".into());
-		assert_eq!(endpoint.host(), "foo.com");
-		assert_eq!(endpoint.port(), 443);
-	}
-
-	#[test]
 	fn with_custom_port() {
-		let endpoint = HttpEndpoint::insecure_host("foo.com".into()).with_port(8080);
+		let endpoint = HttpEndpoint::for_host("foo.com".into()).with_port(8080);
 		assert_eq!(endpoint.host(), "foo.com");
 		assert_eq!(endpoint.port(), 8080);
 	}
 
 	#[test]
 	fn with_uri_path() {
-		let endpoint = HttpEndpoint::insecure_host("foo.com".into()).with_path("/path".into());
+		let endpoint = HttpEndpoint::for_host("foo.com".into()).with_path("/path".into());
 		assert_eq!(endpoint.host(), "foo.com");
 		assert_eq!(endpoint.path(), "/path");
 	}
 
 	#[test]
 	fn without_uri_path() {
-		let endpoint = HttpEndpoint::insecure_host("foo.com".into());
+		let endpoint = HttpEndpoint::for_host("foo.com".into());
 		assert_eq!(endpoint.host(), "foo.com");
 		assert_eq!(endpoint.path(), "/");
 	}
 
 	#[test]
 	fn convert_to_socket_addrs() {
-		let endpoint = HttpEndpoint::insecure_host("foo.com".into());
+		let endpoint = HttpEndpoint::for_host("foo.com".into());
 		let host = endpoint.host();
 		let port = endpoint.port();
 
@@ -569,8 +540,7 @@ pub(crate) mod client_tests {
 		}
 
 		pub fn endpoint(&self) -> HttpEndpoint {
-			HttpEndpoint::insecure_host(self.address.ip().to_string())
-				.with_port(self.address.port())
+			HttpEndpoint::for_host(self.address.ip().to_string()).with_port(self.address.port())
 		}
 	}
 
