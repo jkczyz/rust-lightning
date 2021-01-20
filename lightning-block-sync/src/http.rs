@@ -563,6 +563,9 @@ pub(crate) mod client_tests {
 	#[test]
 	fn connect_with_unknown_server() {
 		match HttpClient::connect(("::", 80)) {
+			#[cfg(target_os = "windows")]
+			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::AddrNotAvailable),
+			#[cfg(not(target_os = "windows"))]
 			Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::ConnectionRefused),
 			Ok(_) => panic!("Expected error"),
 		}
