@@ -141,6 +141,21 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn call_method_returning_malformed_result() {
+		let response = serde_json::json!({ "result": "foo" });
+		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
+		let mut client = RpcClient::new(CREDENTIALS, server.endpoint()).unwrap();
+
+		match client.call_method::<u64>("getblockcount", &[]).await {
+			Err(e) => {
+				assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+				assert_eq!(e.get_ref().unwrap().to_string(), "not a number");
+			},
+			Ok(_) => panic!("Expected error"),
+		}
+	}
+
+	#[tokio::test]
 	async fn call_method_returning_valid_result() {
 		let response = serde_json::json!({ "result": 654470 });
 		let server = HttpServer::responding_with_ok(MessageBody::Content(response));
