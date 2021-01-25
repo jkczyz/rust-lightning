@@ -133,6 +133,7 @@ impl HttpClient {
 	/// Sends a `GET` request for a resource identified by `uri` at the `host`.
 	///
 	/// Returns the response body in `F` format.
+	#[allow(dead_code)]
 	pub async fn get<F>(&mut self, uri: &str, host: &str) -> std::io::Result<F>
 	where F: TryFrom<Vec<u8>, Error = std::io::Error> {
 		let request = format!(
@@ -150,6 +151,7 @@ impl HttpClient {
 	///
 	/// The request body consists of the provided JSON `content`. Returns the response body in `F`
 	/// format.
+	#[allow(dead_code)]
 	pub async fn post<F>(&mut self, uri: &str, host: &str, auth: &str, content: serde_json::Value) -> std::io::Result<F>
 	where F: TryFrom<Vec<u8>, Error = std::io::Error> {
 		let content = content.to_string();
