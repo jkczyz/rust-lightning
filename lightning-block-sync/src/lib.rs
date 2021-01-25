@@ -44,13 +44,49 @@ type AsyncBlockSourceResult<'a, T> = Pin<Box<dyn Future<Output = BlockSourceResu
 ///
 /// Transient errors may be resolved when re-polling, but no attempt will be made to re-poll on
 /// persistent errors.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum BlockSourceError {
+pub struct BlockSourceError {
+	kind: BlockSourceErrorKind,
+	error: Box<dyn std::error::Error + Send + Sync>,
+}
+
+/// The kind of `BlockSourceError`, either persistent or transient.
+#[derive(Clone, Copy)]
+pub enum BlockSourceErrorKind {
 	/// Indicates an error that won't resolve when retrying a request (e.g., invalid data).
 	Persistent,
 
 	/// Indicates an error that may resolve when retrying a request (e.g., unresponsive).
 	Transient,
+}
+
+impl BlockSourceError {
+	/// Creates a new persistent error originated from the given error.
+	pub fn persistent<E>(error: E) -> Self
+	where E: Into<Box<dyn std::error::Error + Send + Sync>> {
+		Self {
+			kind: BlockSourceErrorKind::Persistent,
+			error: error.into(),
+		}
+	}
+
+	/// Creates a new transient error originated from the given error.
+	pub fn transient<E>(error: E) -> Self
+	where E: Into<Box<dyn std::error::Error + Send + Sync>> {
+		Self {
+			kind: BlockSourceErrorKind::Transient,
+			error: error.into(),
+		}
+	}
+
+	/// Returns the kind of error.
+	pub fn kind(&self) -> BlockSourceErrorKind {
+		self.kind
+	}
+
+	/// Converts the error into the underlying error.
+	pub fn into_inner(self) -> Box<dyn std::error::Error + Send + Sync> {
+		self.error
+	}
 }
 
 /// A block header and some associated data. This information should be available from most block
