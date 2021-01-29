@@ -18,6 +18,9 @@ use std::io::Read;
 #[cfg(not(feature = "tokio"))]
 use std::net::TcpStream;
 
+/// Timeout for operations on TCP streams.
+const TCP_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Maximum HTTP message header size in bytes.
 const MAX_HTTP_MESSAGE_HEADER_SIZE: usize = 8192;
 
@@ -95,9 +98,9 @@ impl HttpClient {
 			},
 			Some(address) => address,
 		};
-		let stream = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(1))?;
-		stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-		stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+		let stream = std::net::TcpStream::connect_timeout(&address, TCP_STREAM_TIMEOUT)?;
+		stream.set_read_timeout(Some(TCP_STREAM_TIMEOUT))?;
+		stream.set_write_timeout(Some(TCP_STREAM_TIMEOUT))?;
 
 		#[cfg(feature = "tokio")]
 		let stream = {
@@ -512,7 +515,7 @@ pub(crate) mod client_tests {
 			let handler = std::thread::spawn(move || {
 				for stream in listener.incoming() {
 					let mut stream = stream.unwrap();
-					stream.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
+					stream.set_write_timeout(Some(TCP_STREAM_TIMEOUT)).unwrap();
 
 					let lines_read = std::io::BufReader::new(&stream)
 						.lines()
