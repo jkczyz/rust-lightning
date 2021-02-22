@@ -1,9 +1,11 @@
-use crate::{BlockSource, BlockSourceResult, Cache, ChainListener, ChainNotifier};
+use crate::{BlockSource, BlockSourceResult, Cache, ChainNotifier};
 use crate::poll::{ChainPoller, Validate, ValidatedBlockHeader};
 
 use bitcoin::blockdata::block::{Block, BlockHeader};
 use bitcoin::hash_types::BlockHash;
 use bitcoin::network::constants::Network;
+
+use lightning::chain::ChainListener;
 
 /// Performs a one-time sync of chain listeners using a single *trusted* block source, bringing each
 /// listener's view of the chain from its paired block hash to `block_source`'s best chain tip.
@@ -13,7 +15,88 @@ use bitcoin::network::constants::Network;
 /// paired with.
 ///
 /// Useful during startup to bring the [`ChannelManager`] and each [`ChannelMonitor`] in sync before
-/// switching to [`SpvClient`].
+/// switching to [`SpvClient`]. For example:
+///
+/// ```
+/// use bitcoin::hash_types::BlockHash;
+/// use bitcoin::network::constants::Network;
+///
+/// use lightning::chain;
+/// use lightning::chain::ChainListener;
+/// use lightning::chain::Watch;
+/// use lightning::chain::chainmonitor::ChainMonitor;
+/// use lightning::chain::channelmonitor;
+/// use lightning::chain::channelmonitor::ChannelMonitor;
+/// use lightning::chain::chaininterface::BroadcasterInterface;
+/// use lightning::chain::chaininterface::FeeEstimator;
+/// use lightning::chain::keysinterface;
+/// use lightning::chain::keysinterface::KeysInterface;
+/// use lightning::ln::channelmanager::ChannelManager;
+/// use lightning::ln::channelmanager::ChannelManagerReadArgs;
+/// use lightning::util::config::UserConfig;
+/// use lightning::util::logger::Logger;
+/// use lightning::util::ser::ReadableArgs;
+///
+/// use lightning_block_sync::*;
+///
+/// use std::cell::RefCell;
+/// use std::io::Cursor;
+///
+/// async fn init_sync<
+/// 	B: BlockSource,
+/// 	K: KeysInterface<Signer = S>,
+/// 	S: keysinterface::Sign,
+/// 	T: BroadcasterInterface,
+/// 	F: FeeEstimator,
+/// 	L: Logger,
+/// 	C: chain::Filter,
+/// 	P: channelmonitor::Persist<S>,
+/// >(
+/// 	block_source: &mut B,
+/// 	chain_monitor: &ChainMonitor<S, &C, &T, &F, &L, &P>,
+/// 	config: UserConfig,
+/// 	keys_manager: &K,
+/// 	tx_broadcaster: &T,
+/// 	fee_estimator: &F,
+/// 	logger: &L,
+/// 	persister: &P,
+/// ) {
+/// 	let serialized_monitor = "...";
+/// 	let (monitor_block_hash, mut monitor) = <(BlockHash, ChannelMonitor<S>)>::read(
+/// 		&mut Cursor::new(&serialized_monitor), keys_manager).unwrap();
+///
+/// 	let serialized_manager = "...";
+/// 	let (manager_block_hash, mut manager) = {
+/// 		let read_args = ChannelManagerReadArgs::new(
+/// 			keys_manager,
+/// 			fee_estimator,
+/// 			chain_monitor,
+/// 			tx_broadcaster,
+/// 			logger,
+/// 			config,
+/// 			vec![&mut monitor],
+/// 		);
+/// 		<(BlockHash, ChannelManager<S, &ChainMonitor<S, &C, &T, &F, &L, &P>, &T, &K, &F, &L>)>::read(
+/// 			&mut Cursor::new(&serialized_manager), read_args).unwrap()
+/// 	};
+///
+/// 	let mut cache = UnboundedCache::new();
+/// 	let mut monitor_listener = (RefCell::new(monitor), &*tx_broadcaster, &*fee_estimator, &*logger);
+/// 	let listeners = vec![
+/// 		(monitor_block_hash, &mut monitor_listener as &mut dyn ChainListener),
+/// 		(manager_block_hash, &mut manager as &mut dyn ChainListener),
+/// 	];
+/// 	let chain_tip =
+/// 		init::sync_listeners(block_source, Network::Bitcoin, &mut cache, listeners).await.unwrap();
+///
+/// 	let monitor = monitor_listener.0.into_inner();
+/// 	chain_monitor.watch_channel(monitor.get_funding_txo().0, monitor);
+///
+/// 	let chain_poller = poll::ChainPoller::new(block_source, Network::Bitcoin);
+/// 	let mut chain_listener = (chain_monitor, &manager);
+/// 	let spv_client = SpvClient::new(chain_tip, chain_poller, &mut cache, &chain_listener);
+/// }
+/// ```
 ///
 /// [`SpvClient`]: ../struct.SpvClient.html
 /// [`ChannelManager`]: ../../lightning/ln/channelmanager/struct.ChannelManager.html
@@ -49,32 +132,29 @@ pub async fn sync_listeners<B: BlockSource, C: Cache>(
 	for (old_header, chain_listener) in chain_listeners_with_old_headers.drain(..) {
 		// Disconnect any stale blocks, but keep them in the cache for the next iteration.
 		let header_cache = &mut ReadOnlyCache(header_cache);
-		let mut chain_notifier = ChainNotifier { header_cache };
-		let difference =
-			chain_notifier.find_difference(new_header, &old_header, &mut chain_poller).await?;
-		chain_notifier.disconnect_blocks(
-			difference.disconnected_blocks,
-			&mut DynamicChainListener(chain_listener),
-		);
+		let (common_ancestor, connected_blocks) = {
+			let chain_listener = &DynamicChainListener(chain_listener);
+			let mut chain_notifier = ChainNotifier { header_cache, chain_listener };
+			let difference =
+				chain_notifier.find_difference(new_header, &old_header, &mut chain_poller).await?;
+			chain_notifier.disconnect_blocks(difference.disconnected_blocks);
+			(difference.common_ancestor, difference.connected_blocks)
+		};
 
 		// Keep track of the most common ancestor and all blocks connected across all listeners.
-		chain_listeners_at_height.push((difference.common_ancestor.height, chain_listener));
-		if difference.connected_blocks.len() > most_connected_blocks.len() {
-			most_common_ancestor = Some(difference.common_ancestor);
-			most_connected_blocks = difference.connected_blocks;
+		chain_listeners_at_height.push((common_ancestor.height, chain_listener));
+		if connected_blocks.len() > most_connected_blocks.len() {
+			most_common_ancestor = Some(common_ancestor);
+			most_connected_blocks = connected_blocks;
 		}
 	}
 
 	// Connect new blocks for all listeners at once to avoid re-fetching blocks.
 	if let Some(common_ancestor) = most_common_ancestor {
-		let mut chain_notifier = ChainNotifier { header_cache };
-		let mut chain_listener = ChainListenerSet(chain_listeners_at_height);
-		chain_notifier.connect_blocks(
-			common_ancestor,
-			most_connected_blocks,
-			&mut chain_poller,
-			&mut chain_listener,
-		).await.or_else(|(e, _)| Err(e))?;
+		let chain_listener = &ChainListenerSet(chain_listeners_at_height);
+		let mut chain_notifier = ChainNotifier { header_cache, chain_listener };
+		chain_notifier.connect_blocks(common_ancestor, most_connected_blocks, &mut chain_poller)
+			.await.or_else(|(e, _)| Err(e))?;
 	}
 
 	Ok(new_header)
@@ -104,11 +184,11 @@ impl<'a, C: Cache> Cache for ReadOnlyCache<'a, C> {
 struct DynamicChainListener<'a>(&'a mut dyn ChainListener);
 
 impl<'a> ChainListener for DynamicChainListener<'a> {
-	fn block_connected(&mut self, _block: &Block, _height: u32) {
+	fn block_connected(&self, _block: &Block, _height: u32) {
 		unreachable!()
 	}
 
-	fn block_disconnected(&mut self, header: &BlockHeader, height: u32) {
+	fn block_disconnected(&self, header: &BlockHeader, height: u32) {
 		self.0.block_disconnected(header, height)
 	}
 }
@@ -117,15 +197,15 @@ impl<'a> ChainListener for DynamicChainListener<'a> {
 struct ChainListenerSet<'a>(Vec<(u32, &'a mut dyn ChainListener)>);
 
 impl<'a> ChainListener for ChainListenerSet<'a> {
-	fn block_connected(&mut self, block: &Block, height: u32) {
-		for (starting_height, chain_listener) in self.0.iter_mut() {
+	fn block_connected(&self, block: &Block, height: u32) {
+		for (starting_height, chain_listener) in self.0.iter() {
 			if height > *starting_height {
 				chain_listener.block_connected(block, height);
 			}
 		}
 	}
 
-	fn block_disconnected(&mut self, _header: &BlockHeader, _height: u32) {
+	fn block_disconnected(&self, _header: &BlockHeader, _height: u32) {
 		unreachable!()
 	}
 }
