@@ -92,8 +92,9 @@ use lightning::chain;
 /// 	chain_monitor.watch_channel(monitor.get_funding_txo().0, monitor);
 ///
 /// 	let chain_poller = poll::ChainPoller::new(block_source, Network::Bitcoin);
-/// 	let mut chain_listener = (chain_monitor, &manager);
-/// 	let spv_client = SpvClient::new(chain_tip, chain_poller, &mut cache, &chain_listener);
+/// 	//let mut chain_listener = (chain_monitor, &manager);
+/// 	let chain_listener = std::rc::Rc::new(manager);
+/// 	let spv_client = SpvClient::new(chain_tip, chain_poller, &mut cache, chain_listener);
 /// }
 /// ```
 ///

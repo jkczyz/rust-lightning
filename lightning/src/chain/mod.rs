@@ -137,6 +137,16 @@ pub trait Filter: Send + Sync {
 	fn register_output(&self, outpoint: &OutPoint, script_pubkey: &Script);
 }
 
+impl<T: Listen> Listen for &T {
+	fn block_connected(&self, block: &Block, height: u32) {
+		(**self).block_connected(block, height);
+	}
+
+	fn block_disconnected(&self, header: &BlockHeader, height: u32) {
+		(**self).block_disconnected(header, height);
+	}
+}
+
 impl<T: Listen> Listen for std::ops::Deref<Target = T> {
 	fn block_connected(&self, block: &Block, height: u32) {
 		(**self).block_connected(block, height);
