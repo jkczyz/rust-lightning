@@ -35,7 +35,6 @@ use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1;
 
 use chain;
-use chain::ChainListener;
 use chain::Watch;
 use chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use chain::channelmonitor::{ChannelMonitor, ChannelMonitorUpdate, ChannelMonitorUpdateStep, ChannelMonitorUpdateErr, HTLC_FAIL_BACK_BUFFER, CLTV_CLAIM_BUFFER, LATENCY_GRACE_PERIOD_BLOCKS, ANTI_REORG_DELAY, MonitorEvent, CLOSED_CHANNEL_UPDATE_ID};
@@ -3140,7 +3139,7 @@ impl<Signer: Sign, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> EventsProvi
 	}
 }
 
-impl<Signer: Sign, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> ChainListener for ChannelManager<Signer, M, T, K, F, L>
+impl<Signer: Sign, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> chain::Listen for ChannelManager<Signer, M, T, K, F, L>
 where
 	M::Target: chain::Watch<Signer>,
 	T::Target: BroadcasterInterface,

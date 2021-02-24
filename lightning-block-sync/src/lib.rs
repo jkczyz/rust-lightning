@@ -43,7 +43,8 @@ use bitcoin::blockdata::block::{Block, BlockHeader};
 use bitcoin::hash_types::BlockHash;
 use bitcoin::util::uint::Uint256;
 
-use lightning::chain::ChainListener;
+use lightning::chain;
+use lightning::chain::Listen;
 
 use std::future::Future;
 use std::ops::Deref;
@@ -159,7 +160,7 @@ pub struct BlockHeaderData {
 /// Hence, there is a trade-off between a lower memory footprint and potentially increased network
 /// I/O as headers are re-fetched during fork detection.
 pub struct SpvClient<'a, P: Poll, C: Cache, L: Deref>
-where L::Target: ChainListener {
+where L::Target: chain::Listen {
 	chain_tip: ValidatedBlockHeader,
 	chain_poller: P,
 	chain_notifier: ChainNotifier<'a, C, L>,
@@ -207,8 +208,7 @@ impl Cache for UnboundedCache {
 	}
 }
 
-impl<'a, P: Poll, C: Cache, L: Deref> SpvClient<'a, P, C, L>
-where L::Target: ChainListener {
+impl<'a, P: Poll, C: Cache, L: Deref> SpvClient<'a, P, C, L> where L::Target: chain::Listen {
 	/// Creates a new SPV client using `chain_tip` as the best known chain tip.
 	///
 	/// Subsequent calls to [`poll_best_tip`] will poll for the best chain tip using the given chain
@@ -271,8 +271,8 @@ where L::Target: ChainListener {
 
 /// Notifies [listeners] of blocks that have been connected or disconnected from the chain.
 ///
-/// [listeners]: trait.ChainListener.html
-pub struct ChainNotifier<'a, C: Cache, L: Deref> where L::Target: ChainListener {
+/// [listeners]: ../../lightning/chain/trait.Listen.html
+pub struct ChainNotifier<'a, C: Cache, L: Deref> where L::Target: chain::Listen {
 	/// Cache for looking up headers before fetching from a block source.
 	header_cache: &'a mut C,
 
@@ -298,7 +298,7 @@ struct ChainDifference {
 	connected_blocks: Vec<ValidatedBlockHeader>,
 }
 
-impl<'a, C: Cache, L: Deref> ChainNotifier<'a, C, L> where L::Target: ChainListener {
+impl<'a, C: Cache, L: Deref> ChainNotifier<'a, C, L> where L::Target: chain::Listen {
 	/// Finds the first common ancestor between `new_header` and `old_header`, disconnecting blocks
 	/// from `old_header` to get to that point and then connecting blocks until `new_header`.
 	///

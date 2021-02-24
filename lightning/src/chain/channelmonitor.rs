@@ -41,7 +41,7 @@ use ln::chan_utils;
 use ln::chan_utils::{CounterpartyCommitmentSecrets, HTLCOutputInCommitment, HTLCType, ChannelTransactionParameters, HolderCommitmentTransaction};
 use ln::channelmanager::{HTLCSource, PaymentPreimage, PaymentHash};
 use ln::onchaintx::{OnchainTxHandler, InputDescriptors};
-use chain::ChainListener;
+use chain;
 use chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use chain::transaction::{OutPoint, TransactionData};
 use chain::keysinterface::{SpendableOutputDescriptor, StaticPaymentOutputDescriptor, DelayedPaymentOutputDescriptor, Sign, KeysInterface};
@@ -2299,7 +2299,7 @@ pub trait Persist<ChannelSigner: Sign>: Send + Sync {
 	fn update_persisted_channel(&self, id: OutPoint, update: &ChannelMonitorUpdate, data: &ChannelMonitor<ChannelSigner>) -> Result<(), ChannelMonitorUpdateErr>;
 }
 
-impl<Signer: Sign, T: Deref, F: Deref, L: Deref> ChainListener for (RefCell<ChannelMonitor<Signer>>, T, F, L)
+impl<Signer: Sign, T: Deref, F: Deref, L: Deref> chain::Listen for (RefCell<ChannelMonitor<Signer>>, T, F, L)
 where
 	T::Target: BroadcasterInterface,
 	F::Target: FeeEstimator,

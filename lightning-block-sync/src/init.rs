@@ -5,7 +5,7 @@ use bitcoin::blockdata::block::{Block, BlockHeader};
 use bitcoin::hash_types::BlockHash;
 use bitcoin::network::constants::Network;
 
-use lightning::chain::ChainListener;
+use lightning::chain;
 
 /// Performs a one-time sync of chain listeners using a single *trusted* block source, bringing each
 /// listener's view of the chain from its paired block hash to `block_source`'s best chain tip.
@@ -22,7 +22,6 @@ use lightning::chain::ChainListener;
 /// use bitcoin::network::constants::Network;
 ///
 /// use lightning::chain;
-/// use lightning::chain::ChainListener;
 /// use lightning::chain::Watch;
 /// use lightning::chain::chainmonitor::ChainMonitor;
 /// use lightning::chain::channelmonitor;
@@ -83,8 +82,8 @@ use lightning::chain::ChainListener;
 /// 	let mut cache = UnboundedCache::new();
 /// 	let mut monitor_listener = (RefCell::new(monitor), &*tx_broadcaster, &*fee_estimator, &*logger);
 /// 	let listeners = vec![
-/// 		(monitor_block_hash, &mut monitor_listener as &mut dyn ChainListener),
-/// 		(manager_block_hash, &mut manager as &mut dyn ChainListener),
+/// 		(monitor_block_hash, &mut monitor_listener as &mut dyn chain::Listen),
+/// 		(manager_block_hash, &mut manager as &mut dyn chain::Listen),
 /// 	];
 /// 	let chain_tip =
 /// 		init::sync_listeners(block_source, Network::Bitcoin, &mut cache, listeners).await.unwrap();
@@ -105,7 +104,7 @@ pub async fn sync_listeners<B: BlockSource, C: Cache>(
 	block_source: &mut B,
 	network: Network,
 	header_cache: &mut C,
-	mut chain_listeners: Vec<(BlockHash, &mut dyn ChainListener)>,
+	mut chain_listeners: Vec<(BlockHash, &mut dyn chain::Listen)>,
 ) -> BlockSourceResult<ValidatedBlockHeader> {
 	let (best_block_hash, best_block_height) = block_source.get_best_block().await?;
 	let new_header = block_source
@@ -181,9 +180,9 @@ impl<'a, C: Cache> Cache for ReadOnlyCache<'a, C> {
 }
 
 /// Wrapper for supporting dynamically sized chain listeners.
-struct DynamicChainListener<'a>(&'a mut dyn ChainListener);
+struct DynamicChainListener<'a>(&'a mut dyn chain::Listen);
 
-impl<'a> ChainListener for DynamicChainListener<'a> {
+impl<'a> chain::Listen for DynamicChainListener<'a> {
 	fn block_connected(&self, _block: &Block, _height: u32) {
 		unreachable!()
 	}
@@ -194,9 +193,9 @@ impl<'a> ChainListener for DynamicChainListener<'a> {
 }
 
 /// A set of dynamically sized chain listeners, each paired with a starting block height.
-struct ChainListenerSet<'a>(Vec<(u32, &'a mut dyn ChainListener)>);
+struct ChainListenerSet<'a>(Vec<(u32, &'a mut dyn chain::Listen)>);
 
-impl<'a> ChainListener for ChainListenerSet<'a> {
+impl<'a> chain::Listen for ChainListenerSet<'a> {
 	fn block_connected(&self, block: &Block, height: u32) {
 		for (starting_height, chain_listener) in self.0.iter() {
 			if height > *starting_height {
@@ -232,9 +231,9 @@ mod tests {
 			.expect_block_connected(*chain.at_height(4));
 
 		let listeners = vec![
-			(chain.at_height(1).block_hash, &mut listener_1 as &mut dyn ChainListener),
-			(chain.at_height(2).block_hash, &mut listener_2 as &mut dyn ChainListener),
-			(chain.at_height(3).block_hash, &mut listener_3 as &mut dyn ChainListener),
+			(chain.at_height(1).block_hash, &mut listener_1 as &mut dyn chain::Listen),
+			(chain.at_height(2).block_hash, &mut listener_2 as &mut dyn chain::Listen),
+			(chain.at_height(3).block_hash, &mut listener_3 as &mut dyn chain::Listen),
 		];
 		let mut cache = chain.header_cache(0..=4);
 		match sync_listeners(&mut chain, Network::Bitcoin, &mut cache, listeners).await {
@@ -267,9 +266,9 @@ mod tests {
 			.expect_block_connected(*main_chain.at_height(4));
 
 		let listeners = vec![
-			(fork_chain_1.tip().block_hash, &mut listener_1 as &mut dyn ChainListener),
-			(fork_chain_2.tip().block_hash, &mut listener_2 as &mut dyn ChainListener),
-			(fork_chain_3.tip().block_hash, &mut listener_3 as &mut dyn ChainListener),
+			(fork_chain_1.tip().block_hash, &mut listener_1 as &mut dyn chain::Listen),
+			(fork_chain_2.tip().block_hash, &mut listener_2 as &mut dyn chain::Listen),
+			(fork_chain_3.tip().block_hash, &mut listener_3 as &mut dyn chain::Listen),
 		];
 		let mut cache = fork_chain_1.header_cache(2..=4);
 		cache.extend(fork_chain_2.header_cache(3..=4));
@@ -310,9 +309,9 @@ mod tests {
 			.expect_block_connected(*main_chain.at_height(4));
 
 		let listeners = vec![
-			(fork_chain_1.tip().block_hash, &mut listener_1 as &mut dyn ChainListener),
-			(fork_chain_2.tip().block_hash, &mut listener_2 as &mut dyn ChainListener),
-			(fork_chain_3.tip().block_hash, &mut listener_3 as &mut dyn ChainListener),
+			(fork_chain_1.tip().block_hash, &mut listener_1 as &mut dyn chain::Listen),
+			(fork_chain_2.tip().block_hash, &mut listener_2 as &mut dyn chain::Listen),
+			(fork_chain_3.tip().block_hash, &mut listener_3 as &mut dyn chain::Listen),
 		];
 		let mut cache = fork_chain_1.header_cache(2..=4);
 		cache.extend(fork_chain_2.header_cache(3..=4));
@@ -334,7 +333,7 @@ mod tests {
 			.expect_block_disconnected(*old_tip)
 			.expect_block_connected(*new_tip);
 
-		let listeners = vec![(old_tip.block_hash, &mut listener as &mut dyn ChainListener)];
+		let listeners = vec![(old_tip.block_hash, &mut listener as &mut dyn chain::Listen)];
 		let mut cache = fork_chain.header_cache(2..=2);
 		match sync_listeners(&mut main_chain, Network::Bitcoin, &mut cache, listeners).await {
 			Ok(_) => {

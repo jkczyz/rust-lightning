@@ -47,10 +47,11 @@ pub trait Access: Send + Sync {
 	fn get_utxo(&self, genesis_hash: &BlockHash, short_channel_id: u64) -> Result<TxOut, AccessError>;
 }
 
-/// Adaptor used for notifying when blocks have been connected or disconnected from the chain.
+/// The `Listen` trait is used to be notified of when blocks have been connected or disconnected
+/// from the chain.
 ///
-/// Used when needing to replay chain data upon startup or as new chain events occur.
-pub trait ChainListener {
+/// Useful when needing to replay chain data upon startup or as new chain events occur.
+pub trait Listen {
 	/// Notifies the listener that a block was added at the given height.
 	fn block_connected(&self, block: &Block, height: u32);
 
@@ -136,7 +137,7 @@ pub trait Filter: Send + Sync {
 	fn register_output(&self, outpoint: &OutPoint, script_pubkey: &Script);
 }
 
-impl<T: ChainListener> ChainListener for std::ops::Deref<Target = T> {
+impl<T: Listen> Listen for std::ops::Deref<Target = T> {
 	fn block_connected(&self, block: &Block, height: u32) {
 		(**self).block_connected(block, height);
 	}
@@ -146,10 +147,10 @@ impl<T: ChainListener> ChainListener for std::ops::Deref<Target = T> {
 	}
 }
 
-impl<T: std::ops::Deref, U: std::ops::Deref> ChainListener for (T, U)
+impl<T: std::ops::Deref, U: std::ops::Deref> Listen for (T, U)
 where
-	T::Target: ChainListener,
-	U::Target: ChainListener,
+	T::Target: Listen,
+	U::Target: Listen,
 {
 	fn block_connected(&self, block: &Block, height: u32) {
 		self.0.block_connected(block, height);

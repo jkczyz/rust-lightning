@@ -1,4 +1,4 @@
-use crate::{AsyncBlockSourceResult, BlockHeaderData, BlockSource, BlockSourceError, ChainListener, UnboundedCache};
+use crate::{AsyncBlockSourceResult, BlockHeaderData, BlockSource, BlockSourceError, UnboundedCache};
 use crate::poll::{Validate, ValidatedBlockHeader};
 
 use bitcoin::blockdata::block::{Block, BlockHeader};
@@ -6,6 +6,8 @@ use bitcoin::blockdata::constants::genesis_block;
 use bitcoin::hash_types::BlockHash;
 use bitcoin::network::constants::Network;
 use bitcoin::util::uint::Uint256;
+
+use lightning::chain;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -163,7 +165,7 @@ impl BlockSource for Blockchain {
 
 pub struct NullChainListener;
 
-impl ChainListener for NullChainListener {
+impl chain::Listen for NullChainListener {
 	fn block_connected(&self, _block: &Block, _height: u32) {}
 	fn block_disconnected(&self, _header: &BlockHeader, _height: u32) {}
 }
@@ -192,7 +194,7 @@ impl MockChainListener {
 	}
 }
 
-impl ChainListener for MockChainListener {
+impl chain::Listen for MockChainListener {
 	fn block_connected(&self, block: &Block, height: u32) {
 		match self.expected_blocks_connected.borrow_mut().pop_front() {
 			None => {

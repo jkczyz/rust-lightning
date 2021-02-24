@@ -32,7 +32,6 @@
 use bitcoin::blockdata::block::{Block, BlockHeader};
 
 use chain;
-use chain::ChainListener;
 use chain::Filter;
 use chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use chain::channelmonitor;
@@ -142,7 +141,7 @@ where C::Target: chain::Filter,
 }
 
 impl<ChannelSigner: Sign, C: Deref + Send + Sync, T: Deref + Send + Sync, F: Deref + Send + Sync, L: Deref + Send + Sync, P: Deref + Send + Sync>
-ChainListener for ChainMonitor<ChannelSigner, C, T, F, L, P>
+chain::Listen for ChainMonitor<ChannelSigner, C, T, F, L, P>
 where
 	ChannelSigner: Sign,
 	C::Target: chain::Filter,
