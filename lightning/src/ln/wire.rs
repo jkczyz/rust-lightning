@@ -13,7 +13,7 @@
 //! The [`Message`] enum returned by [`read()`] wraps the decoded message or the message type (if
 //! unknown) to use with pattern matching.
 //!
-//! Messages implementing the [`Encode`] trait define a message type and can be sent over the wire
+//! Messages implementing the [`Type`] trait define a message type and can be sent over the wire
 //! using [`write()`].
 //!
 //! [BOLT #1]: https://github.com/lightningnetwork/lightning-rfc/blob/master/01-messaging.md
@@ -26,7 +26,7 @@ use util::ser::{Readable, Writeable, Writer};
 /// decoders.
 pub trait CustomMessageReader {
 	/// The type of the message decoded by the implementation.
-	type CustomMessage : core::fmt::Debug + TypedMessage + Writeable;
+	type CustomMessage : core::fmt::Debug + Type + Writeable;
 	/// Decodes a custom message to `CustomMessageType`. If the given message type is known to the implementation and
 	/// the message could be decoded, must return `Ok(Some(message))`. If the message type
 	/// is unknown to the implementation, must return `Ok(None)`. If a decoding error
@@ -38,7 +38,7 @@ pub trait CustomMessageReader {
 /// variant contains a message from [`msgs`] or otherwise the message type if unknown.
 #[allow(missing_docs)]
 #[derive(Debug)]
-pub(crate) enum Message<T> where T: core::fmt::Debug + TypedMessage {
+pub(crate) enum Message<T> where T: core::fmt::Debug + Type {
 	Init(msgs::Init),
 	Error(msgs::ErrorMessage),
 	Ping(msgs::Ping),
@@ -76,7 +76,7 @@ pub(crate) enum Message<T> where T: core::fmt::Debug + TypedMessage {
 #[derive(Clone, Copy, Debug)]
 pub struct MessageType(u16);
 
-impl<T> Message<T> where T: core::fmt::Debug + TypedMessage {
+impl<T> Message<T> where T: core::fmt::Debug + Type {
 	#[allow(dead_code)] // This method is only used in tests
 	/// Returns the type that was used to decode the message payload.
 	pub fn type_id(&self) -> MessageType {
@@ -110,7 +110,7 @@ impl<T> Message<T> where T: core::fmt::Debug + TypedMessage {
 			&Message::ReplyChannelRange(ref msg) => msg.type_id(),
 			&Message::GossipTimestampFilter(ref msg) => msg.type_id(),
 			&Message::Unknown(type_id) => type_id,
-			&Message::Custom(ref msg) => MessageType(msg.msg_type()),
+			&Message::Custom(ref msg) => msg.type_id(),
 		}
 	}
 }
@@ -139,7 +139,7 @@ pub(crate) fn read<R: io::Read, T, H: core::ops::Deref>(
 	custom_reader: &H
 ) -> Result<Message<T>, msgs::DecodeError>
 where
-	T: core::fmt::Debug + TypedMessage + Writeable,
+	T: core::fmt::Debug + Type + Writeable,
 	H::Target: CustomMessageReader<CustomMessage = T>
 {
 	let message_type = <u16 as Readable>::read(buffer)?;
@@ -244,39 +244,32 @@ where
 /// # Errors
 ///
 /// Returns an I/O error if the write could not be completed.
-pub fn write<M: TypedMessage + Writeable, W: Writer>(message: &M, buffer: &mut W) -> Result<(), io::Error> {
-	message.msg_type().write(buffer)?;
+pub fn write<M: Type + Writeable, W: Writer>(message: &M, buffer: &mut W) -> Result<(), io::Error> {
+	message.type_id().0.write(buffer)?;
 	message.write(buffer)
 }
 
-pub(crate) mod encode {
-	use super::*;
-	/// Defines a type-identified encoding for sending messages over the wire.
-	///
-	/// Messages implementing this trait specify a type and must be [`Writeable`] to use with [`write()`].
+mod encode {
+	/// Defines a constant type identifier for reading messages from the wire.
 	pub trait Encode {
 		/// The type identifying the message payload.
 		const TYPE: u16;
-
-		/// Returns the type identifying the message payload. Convenience method for accessing
-		/// [`Self::TYPE`].
-		fn type_id(&self) -> MessageType {
-			MessageType(Self::TYPE)
-		}
 	}
 }
 
 pub(crate) use self::encode::Encode;
 
-/// A message that has an associated type id.
-pub trait TypedMessage {
-	/// The type id for the implementing message.
-	fn msg_type(&self) -> u16;
+/// Defines a type identifier for sending messages over the wire.
+///
+/// Messages implementing this trait specify a type and must be [`Writeable`] to use with [`write()`].
+pub trait Type {
+	/// Returns the type identifying the message payload.
+	fn type_id(&self) -> MessageType;
 }
 
-impl<T> TypedMessage for T where T: Encode {
-	fn msg_type(&self) -> u16 {
-		T::TYPE
+impl<T> Type for T where T: Encode {
+	fn type_id(&self) -> MessageType {
+		MessageType(T::TYPE)
 	}
 }
 
@@ -559,9 +552,9 @@ mod tests {
 
 	const CUSTOM_MESSAGE_TYPE : u16 = 9000;
 
-	impl TypedMessage for TestCustomMessage {
-		fn msg_type(&self) -> u16 {
-			CUSTOM_MESSAGE_TYPE
+	impl Type for TestCustomMessage {
+		fn type_id(&self) -> MessageType {
+			MessageType(CUSTOM_MESSAGE_TYPE)
 		}
 	}
 
@@ -598,7 +591,7 @@ mod tests {
 		let decoded_msg = read(&mut reader, &TestCustomMessageReader{}).unwrap();
 		match decoded_msg {
 			Message::Custom(custom) => {
-				assert_eq!(custom.msg_type(), CUSTOM_MESSAGE_TYPE);
+				assert_eq!(custom.type_id().0, CUSTOM_MESSAGE_TYPE);
 				assert_eq!(custom, TestCustomMessage {});
 			},
 			_ => panic!("Expected custom message, found message type: {}", decoded_msg.type_id()),

@@ -24,7 +24,7 @@ use ln::channelmanager::{SimpleArcChannelManager, SimpleRefChannelManager};
 use util::ser::{VecWriter, Writeable, Writer};
 use ln::peer_channel_encryptor::{PeerChannelEncryptor,NextNoiseStep};
 use ln::wire;
-use ln::wire::TypedMessage;
+use ln::wire::MessageType;
 use util::byte_utils;
 use util::events::{MessageSendEvent, MessageSendEventsProvider};
 use util::logger::Logger;
@@ -85,8 +85,8 @@ pub struct IgnoringCustomMessageHandler{}
 
 type DummyCustomType = ();
 
-impl TypedMessage for DummyCustomType {
-	fn msg_type(&self) -> u16 {
+impl wire::Type for DummyCustomType {
+	fn type_id(&self) -> MessageType {
 		// We should never call this for `DummyCustomType`
 		unreachable!();
 	}
@@ -727,7 +727,7 @@ impl<Descriptor: SocketDescriptor, CM: Deref, RM: Deref, L: Deref, CMH: Deref> P
 	}
 
 	/// Append a message to a peer's pending outbound/write buffer, and update the map of peers needing sends accordingly.
-	fn enqueue_message<M: TypedMessage + Writeable + Debug>(&self, peer: &mut Peer, message: &M) {
+	fn enqueue_message<M: wire::Type + Writeable + Debug>(&self, peer: &mut Peer, message: &M) {
 		let mut buffer = VecWriter(Vec::new());
 		wire::write(message, &mut buffer).unwrap(); // crash if the write failed
 		let encoded_message = buffer.0;
