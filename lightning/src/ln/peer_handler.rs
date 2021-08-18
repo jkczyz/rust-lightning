@@ -24,7 +24,6 @@ use ln::channelmanager::{SimpleArcChannelManager, SimpleRefChannelManager};
 use util::ser::{VecWriter, Writeable, Writer};
 use ln::peer_channel_encryptor::{PeerChannelEncryptor,NextNoiseStep};
 use ln::wire;
-use ln::wire::MessageType;
 use util::byte_utils;
 use util::events::{MessageSendEvent, MessageSendEventsProvider};
 use util::logger::Logger;
@@ -86,7 +85,7 @@ pub struct IgnoringCustomMessageHandler{}
 type DummyCustomType = ();
 
 impl wire::Type for DummyCustomType {
-	fn type_id(&self) -> MessageType {
+	fn type_id(&self) -> u16 {
 		// We should never call this for `DummyCustomType`
 		unreachable!();
 	}
@@ -1085,13 +1084,13 @@ impl<Descriptor: SocketDescriptor, CM: Deref, RM: Deref, L: Deref, CMH: Deref> P
 			},
 
 			// Unknown messages:
-			wire::Message::Unknown(msg_type) if msg_type.is_even() => {
-				log_debug!(self.logger, "Received unknown even message of type {}, disconnecting peer!", msg_type);
+			wire::Message::Unknown(type_id) if message.is_even() => {
+				log_debug!(self.logger, "Received unknown even message of type {}, disconnecting peer!", type_id);
 				// Fail the channel if message is an even, unknown type as per BOLT #1.
 				return Err(PeerHandleError{ no_connection_possible: true }.into());
 			},
-			wire::Message::Unknown(msg_type) => {
-				log_trace!(self.logger, "Received unknown odd message of type {}, ignoring", msg_type);
+			wire::Message::Unknown(type_id) => {
+				log_trace!(self.logger, "Received unknown odd message of type {}, ignoring", type_id);
 			},
 			wire::Message::Custom(custom) => {
 				self.custom_message_handler.handle_custom_message(custom)?;
