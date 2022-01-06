@@ -650,44 +650,19 @@ pub struct ChannelInfo {
 }
 
 impl ChannelInfo {
-	/// Returns a [`DirectedChannelInfo`] for the channel from `source` to `target`.
-	///
-	/// # Panics
-	///
-	/// Panics if `source` and `target` are not the channel's counterparties.
-	pub fn as_directed(&self, source: &NodeId, target: &NodeId) -> DirectedChannelInfo {
-		let (direction, source, target) = {
-			if source == &self.node_one && target == &self.node_two {
-				(self.one_to_two.as_ref(), &self.node_one, &self.node_two)
-			} else if source == &self.node_two && target == &self.node_one {
-				(self.two_to_one.as_ref(), &self.node_two, &self.node_one)
-			} else if source != &self.node_one && source != &self.node_two {
-				panic!("Unknown source node: {:?}", source)
-			} else if target != &self.node_one && target != &self.node_two {
-				panic!("Unknown target node: {:?}", target)
-			} else {
-				unreachable!()
-			}
-		};
-		DirectedChannelInfo { channel: self, direction, source, target }
-	}
-
-	/// Returns a [`DirectedChannelInfo`] for the channel directed to the given `target`.
-	///
-	/// # Panics
-	///
-	/// Panics if `target` is not one of the channel's counterparties.
-	pub fn directed_to(&self, target: &NodeId) -> DirectedChannelInfo {
+	/// Returns a [`DirectedChannelInfo`] for the channel directed to the given `target`, or `None`
+	/// if `target` is not one of the channel's counterparties.
+	pub fn as_directed_to(&self, target: &NodeId) -> Option<DirectedChannelInfo> {
 		let (direction, source, target) = {
 			if target == &self.node_one {
 				(self.two_to_one.as_ref(), &self.node_two, &self.node_one)
 			} else if target == &self.node_two {
 				(self.one_to_two.as_ref(), &self.node_one, &self.node_two)
 			} else {
-				panic!("Unknown target node: {:?}", target)
+				return None;
 			}
 		};
-		DirectedChannelInfo { channel: self, direction, source, target }
+		Some(DirectedChannelInfo { channel: self, direction, source, target })
 	}
 }
 
