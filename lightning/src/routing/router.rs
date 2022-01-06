@@ -1049,7 +1049,8 @@ where L::Target: Logger {
 					for chan_id in $node.channels.iter() {
 						let chan = network_channels.get(chan_id).unwrap();
 						if !chan.features.requires_unknown_bits() {
-							let directed_channel = chan.directed_to(&$node_id);
+							let directed_channel =
+								chan.as_directed_to(&$node_id).expect("inconsistent NetworkGraph");
 							let source = directed_channel.source();
 							let target = directed_channel.target();
 							if first_hops.is_none() || *source != our_node_id {
@@ -1134,7 +1135,7 @@ where L::Target: Logger {
 					let target = NodeId::from_pubkey(&prev_hop_id);
 					let candidate = network_channels
 						.get(&hop.short_channel_id)
-						.map(|channel| channel.as_directed(&source, &target).into_parts())
+						.and_then(|channel| channel.as_directed_to(&target).map(|d| d.into_parts()))
 						.and_then(|(channel, direction)| {
 							direction.map(|direction|
 								CandidateRouteHop::PublicHop {
