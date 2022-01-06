@@ -211,14 +211,13 @@ type ConfiguredTime = time::Eternity;
 
 /// [`Score`] implementation.
 ///
-/// See [`Scorer`] for details.
-///
 /// # Note
 ///
 /// Mixing the `no-std` feature between serialization and deserialization results in undefined
 /// behavior.
 ///
 /// (C-not exported) generally all users should use the [`Scorer`] type alias.
+#[doc(hidden)]
 pub struct ScorerUsingTime<T: Time> {
 	params: ScoringParameters,
 	// TODO: Remove entries of closed channels.
@@ -467,14 +466,13 @@ pub type ProbabilisticScorer<G> = ProbabilisticScorerUsingTime::<G, ConfiguredTi
 
 /// Probabilistic [`Score`] implementation.
 ///
-/// See [`ProbabilisticScorer`] for details.
-///
 /// # Note
 ///
 /// Mixing the `no-std` feature between serialization and deserialization results in undefined
 /// behavior.
 ///
 /// (C-not exported) generally all users should use the [`ProbabilisticScorer`] type alias.
+#[doc(hidden)]
 pub struct ProbabilisticScorerUsingTime<G: Deref<Target = NetworkGraph>, T: Time> {
 	params: ProbabilisticScoringParameters,
 	node_id: NodeId,
