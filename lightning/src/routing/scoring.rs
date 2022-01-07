@@ -681,24 +681,24 @@ impl<L: DerefMut<Target = u64>, T: Time, U: DerefMut<Target = T>> DirectedChanne
 
 	/// Adjusts the lower bound of the channel liquidity balance in this direction.
 	fn set_min_liquidity_msat(&mut self, amount_msat: u64) {
-		*self.last_updated = self.now;
 		*self.min_liquidity_offset_msat = amount_msat;
 		*self.max_liquidity_offset_msat = if amount_msat > self.max_liquidity_msat() {
 			0
 		} else {
 			self.decayed_offset_msat(*self.max_liquidity_offset_msat)
 		};
+		*self.last_updated = self.now;
 	}
 
 	/// Adjusts the upper bound of the channel liquidity balance in this direction.
 	fn set_max_liquidity_msat(&mut self, amount_msat: u64) {
-		*self.last_updated = self.now;
 		*self.max_liquidity_offset_msat = self.capacity_msat.checked_sub(amount_msat).unwrap_or(0);
 		*self.min_liquidity_offset_msat = if amount_msat < self.min_liquidity_msat() {
 			0
 		} else {
 			self.decayed_offset_msat(*self.min_liquidity_offset_msat)
-		}
+		};
+		*self.last_updated = self.now;
 	}
 }
 
