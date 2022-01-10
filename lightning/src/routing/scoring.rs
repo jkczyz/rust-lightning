@@ -9,8 +9,8 @@
 
 //! Utilities for scoring payment channels.
 //!
-//! [`Scorer`] may be given to [`find_route`] to score payment channels during path finding when a
-//! custom [`Score`] implementation is not needed.
+//! [`ProbabilisticScorer`] may be given to [`find_route`] to score payment channels during path
+//! finding when a custom [`Score`] implementation is not needed.
 //!
 //! # Example
 //!
@@ -19,7 +19,7 @@
 //! #
 //! # use lightning::routing::network_graph::NetworkGraph;
 //! # use lightning::routing::router::{RouteParameters, find_route};
-//! # use lightning::routing::scoring::{Scorer, ScoringParameters};
+//! # use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParameters, Scorer, ScoringParameters};
 //! # use lightning::util::logger::{Logger, Record};
 //! # use secp256k1::key::PublicKey;
 //! #
@@ -27,20 +27,21 @@
 //! # impl Logger for FakeLogger {
 //! #     fn log(&self, record: &Record) { unimplemented!() }
 //! # }
-//! # fn find_scored_route(payer: PublicKey, params: RouteParameters, network_graph: NetworkGraph) {
+//! # fn find_scored_route(payer: PublicKey, route_params: RouteParameters, network_graph: NetworkGraph) {
 //! # let logger = FakeLogger {};
 //! #
 //! // Use the default channel penalties.
-//! let scorer = Scorer::default();
+//! let params = ProbabilisticScoringParameters::default();
+//! let scorer = ProbabilisticScorer::new(params, payer, &network_graph);
 //!
 //! // Or use custom channel penalties.
-//! let scorer = Scorer::new(ScoringParameters {
-//!     base_penalty_msat: 1000,
-//!     failure_penalty_msat: 2 * 1024 * 1000,
-//!     ..ScoringParameters::default()
-//! });
+//! let params = ProbabilisticScoringParameters {
+//!     liquidity_penalty_multiplier_msat: 2 * 1000,
+//!     ..ProbabilisticScoringParameters::default()
+//! };
+//! let scorer = ProbabilisticScorer::new(params, payer, &network_graph);
 //!
-//! let route = find_route(&payer, &params, &network_graph, None, &logger, &scorer);
+//! let route = find_route(&payer, &route_params, &network_graph, None, &logger, &scorer);
 //! # }
 //! ```
 //!
