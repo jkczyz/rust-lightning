@@ -463,7 +463,7 @@ impl<T: Time> Readable for ChannelFailure<T> {
 ///
 /// [1]: https://arxiv.org/abs/2107.05322
 pub struct ProbabilisticScorer<G: Deref<Target = NetworkGraph>> {
-	_params: ProbabilisticScoringParameters,
+	params: ProbabilisticScoringParameters,
 	node_id: NodeId,
 	network_graph: G,
 	// TODO: Remove entries of closed channels.
@@ -471,9 +471,19 @@ pub struct ProbabilisticScorer<G: Deref<Target = NetworkGraph>> {
 }
 
 /// Parameters for configuring [`ProbabilisticScorer`].
-pub struct ProbabilisticScoringParameters;
+pub struct ProbabilisticScoringParameters {
+	/// A penalty applied after multiplying by the negative log of channel's success probability for
+	/// a payment.
+	///
+	/// The success probability is determined by the effective channel capacity, the payment amount,
+	/// and knowledge learned from prior successful and unsuccessful payments.
+	///
+	/// Default value: 1,000 msat
+	pub liquidity_penalty_multiplier_msat: u64,
+}
 
 impl_writeable_tlv_based!(ProbabilisticScoringParameters, {
+	(0, liquidity_penalty_multiplier_msat, required),
 });
 
 /// Accounting for channel liquidity balance uncertainty.
@@ -504,10 +514,10 @@ impl<G: Deref<Target = NetworkGraph>> ProbabilisticScorer<G> {
 	/// Creates a new scorer using the given scoring parameters for sending payments from a node
 	/// through a network graph.
 	pub fn new(
-		_params: ProbabilisticScoringParameters, node_pubkey: PublicKey, network_graph: G
+		params: ProbabilisticScoringParameters, node_pubkey: PublicKey, network_graph: G
 	) -> Self {
 		Self {
-			_params,
+			params,
 			node_id: NodeId::from_pubkey(&node_pubkey),
 			network_graph,
 			channel_liquidities: HashMap::new(),
@@ -523,7 +533,9 @@ impl<G: Deref<Target = NetworkGraph>> ProbabilisticScorer<G> {
 
 impl Default for ProbabilisticScoringParameters {
 	fn default() -> Self {
-		Self
+		Self {
+			liquidity_penalty_multiplier_msat: 1000,
+		}
 	}
 }
 
@@ -654,6 +666,7 @@ impl<G: Deref<Target = NetworkGraph>> Score for ProbabilisticScorer<G> {
 			return 0;
 		}
 
+		let liquidity_penalty_multiplier_msat = self.params.liquidity_penalty_multiplier_msat;
 		let success_probability = self.channel_liquidities
 			.get(&short_channel_id)
 			.unwrap_or(&ChannelLiquidity::new())
@@ -664,7 +677,7 @@ impl<G: Deref<Target = NetworkGraph>> Score for ProbabilisticScorer<G> {
 			Probability::One => 0,
 			Probability::Ratio { numerator, denominator } => {
 				let success_probability = numerator as f64 / denominator as f64;
-				(-(success_probability.log10()) * amount_msat as f64) as u64
+				(-(success_probability.log10()) * liquidity_penalty_multiplier_msat as f64) as u64
 			},
 		}
 	}
@@ -732,7 +745,7 @@ impl<G: Deref<Target = NetworkGraph>> Score for ProbabilisticScorer<G> {
 impl<G: Deref<Target = NetworkGraph>> Writeable for ProbabilisticScorer<G> {
 	#[inline]
 	fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
-		self._params.write(w)?;
+		self.params.write(w)?;
 		self.node_id.write(w)?;
 		self.channel_liquidities.write(w)?;
 		write_tlv_fields!(w, {});
@@ -744,7 +757,7 @@ impl<G: Deref<Target = NetworkGraph>> ReadableArgs<G> for ProbabilisticScorer<G>
 	#[inline]
 	fn read<R: Read>(r: &mut R, args: G) -> Result<Self, DecodeError> {
 		let res = Ok(Self {
-			_params: Readable::read(r)?,
+			params: Readable::read(r)?,
 			node_id: Readable::read(r)?,
 			network_graph: args,
 			channel_liquidities: Readable::read(r)?,
@@ -1370,16 +1383,16 @@ mod tests {
 
 		assert_eq!(scorer.channel_penalty_msat(42, 100, 100_000, &source, &target), 0);
 		assert_eq!(scorer.channel_penalty_msat(42, 1_000, 100_000, &source, &target), 4);
-		assert_eq!(scorer.channel_penalty_msat(42, 10_000, 100_000, &source, &target), 457);
-		assert_eq!(scorer.channel_penalty_msat(42, 100_000, 100_000, &source, &target), 500_000);
+		assert_eq!(scorer.channel_penalty_msat(42, 10_000, 100_000, &source, &target), 45);
+		assert_eq!(scorer.channel_penalty_msat(42, 100_000, 100_000, &source, &target), 5_000);
 
-		assert_eq!(scorer.channel_penalty_msat(42, 125, 1_000, &source, &target), 7);
-		assert_eq!(scorer.channel_penalty_msat(42, 250, 1_000, &source, &target), 31);
-		assert_eq!(scorer.channel_penalty_msat(42, 375, 1_000, &source, &target), 76);
-		assert_eq!(scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 150);
-		assert_eq!(scorer.channel_penalty_msat(42, 625, 1_000, &source, &target), 265);
-		assert_eq!(scorer.channel_penalty_msat(42, 750, 1_000, &source, &target), 450);
-		assert_eq!(scorer.channel_penalty_msat(42, 875, 1_000, &source, &target), 787);
+		assert_eq!(scorer.channel_penalty_msat(42, 125, 1_000, &source, &target), 57);
+		assert_eq!(scorer.channel_penalty_msat(42, 250, 1_000, &source, &target), 124);
+		assert_eq!(scorer.channel_penalty_msat(42, 375, 1_000, &source, &target), 203);
+		assert_eq!(scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 300);
+		assert_eq!(scorer.channel_penalty_msat(42, 625, 1_000, &source, &target), 425);
+		assert_eq!(scorer.channel_penalty_msat(42, 750, 1_000, &source, &target), 600);
+		assert_eq!(scorer.channel_penalty_msat(42, 875, 1_000, &source, &target), 900);
 	}
 
 	#[test]
@@ -1414,14 +1427,14 @@ mod tests {
 		let path = payment_path(200);
 
 		assert_eq!(scorer.channel_penalty_msat(41, 200, 1_000, &sender, &source), 0);
-		assert_eq!(scorer.channel_penalty_msat(42, 200, 1_000, &source, &target), 94);
-		assert_eq!(scorer.channel_penalty_msat(43, 200, 1_000, &target, &recipient), 35);
+		assert_eq!(scorer.channel_penalty_msat(42, 200, 1_000, &source, &target), 474);
+		assert_eq!(scorer.channel_penalty_msat(43, 200, 1_000, &target, &recipient), 175);
 
 		scorer.payment_path_successful(&path.iter().collect::<Vec<_>>());
 
 		assert_eq!(scorer.channel_penalty_msat(41, 200, 1_000, &sender, &source), 0);
 		assert_eq!(scorer.channel_penalty_msat(42, 200, 1_000, &source, &target), u64::max_value());
-		assert_eq!(scorer.channel_penalty_msat(43, 200, 1_000, &target, &recipient), 59);
+		assert_eq!(scorer.channel_penalty_msat(43, 200, 1_000, &target, &recipient), 299);
 	}
 
 	// TODO: Add more test coverage
