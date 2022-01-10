@@ -395,7 +395,7 @@ impl<'a> CandidateRouteHop<'a> {
 	fn effective_capacity(&self) -> EffectiveCapacity {
 		match self {
 			CandidateRouteHop::FirstHop { details } => EffectiveCapacity::ExactLiquidity {
-				liquidity_msast: details.outbound_capacity_msat,
+				liquidity_msat: details.outbound_capacity_msat,
 			},
 			CandidateRouteHop::PublicHop { channel, direction, .. } => {
 				DirectedChannelInfo::effective_capacity_from_parts(channel, Some(direction))
