@@ -748,7 +748,7 @@ pub enum EffectiveCapacity {
 	ExactLiquidity {
 		/// Either the inbound or outbound liquidity depending on the direction, denominated in
 		/// millisatoshi.
-		liquidity_msast: u64,
+		liquidity_msat: u64,
 	},
 	/// The maximum HTLC amount in one direction as advertised on the gossip network.
 	MaximumHTLC {
@@ -776,7 +776,7 @@ impl EffectiveCapacity {
 	/// Returns the effective capacity denominated in millisatoshi.
 	pub fn as_msat(&self) -> u64 {
 		match self {
-			EffectiveCapacity::ExactLiquidity { liquidity_msast } => *liquidity_msast,
+			EffectiveCapacity::ExactLiquidity { liquidity_msat } => *liquidity_msat,
 			EffectiveCapacity::MaximumHTLC { amount_msat } => *amount_msat,
 			EffectiveCapacity::Total { capacity_msat } => *capacity_msat,
 			EffectiveCapacity::Infinite => u64::max_value(),
