@@ -941,7 +941,7 @@ mod tests {
 	use routing::scoring::Score;
 	use routing::network_graph::{NetworkGraph, NodeId};
 	use routing::router::RouteHop;
-	use util::ser::{Readable, Writeable};
+	use util::ser::{Readable, ReadableArgs, Writeable};
 
 	use bitcoin::blockdata::constants::genesis_block;
 	use bitcoin::hashes::Hash;
@@ -1286,7 +1286,7 @@ mod tests {
 	// `ProbabilisticScorer` tests
 
 	/// A probabilistic scorer for testing with time that can be manually advanced.
-	type ProbabilisticScorer<G> = ProbabilisticScorerUsingTime::<G, SinceEpoch>;
+	type ProbabilisticScorer<'a> = ProbabilisticScorerUsingTime::<&'a NetworkGraph, SinceEpoch>;
 
 	fn sender_privkey() -> SecretKey {
 		SecretKey::from_slice(&[41; 32]).unwrap()
@@ -1833,5 +1833,65 @@ mod tests {
 		assert_eq!(scorer.channel_penalty_msat(42, 512, 1_024, &source, &target), 280);
 	}
 
-	// TODO: Add test coverage for serialization
+	#[test]
+	fn restores_persisted_liquidity_bounds() {
+		let network_graph = network_graph();
+		let params = ProbabilisticScoringParameters {
+			liquidity_penalty_multiplier_msat: 1_000,
+			liquidity_offset_half_life: Duration::from_secs(10),
+		};
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
+		let source = source_node_id();
+		let target = target_node_id();
+
+		scorer.payment_path_failed(&payment_path_for_amount(500).iter().collect::<Vec<_>>(), 42);
+		assert_eq!(scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 2699);
+
+		SinceEpoch::advance(Duration::from_secs(10));
+		assert_eq!(scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 475);
+
+		scorer.payment_path_failed(&payment_path_for_amount(250).iter().collect::<Vec<_>>(), 43);
+		assert_eq!(scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 300);
+
+		let mut serialized_scorer = Vec::new();
+		scorer.write(&mut serialized_scorer).unwrap();
+
+		let mut serialized_scorer = io::Cursor::new(&serialized_scorer);
+		let args = (&sender_pubkey(), &network_graph);
+		let deserialized_scorer =
+			<ProbabilisticScorer>::read(&mut serialized_scorer, args).unwrap();
+		assert_eq!(deserialized_scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 300);
+	}
+
+	#[test]
+	fn decays_persisted_liquidity_bounds() {
+		let network_graph = network_graph();
+		let params = ProbabilisticScoringParameters {
+			liquidity_penalty_multiplier_msat: 1_000,
+			liquidity_offset_half_life: Duration::from_secs(10),
+		};
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
+		let source = source_node_id();
+		let target = target_node_id();
+
+		scorer.payment_path_failed(&payment_path_for_amount(500).iter().collect::<Vec<_>>(), 42);
+		assert_eq!(scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 2699);
+
+		let mut serialized_scorer = Vec::new();
+		scorer.write(&mut serialized_scorer).unwrap();
+
+		SinceEpoch::advance(Duration::from_secs(10));
+
+		let mut serialized_scorer = io::Cursor::new(&serialized_scorer);
+		let args = (&sender_pubkey(), &network_graph);
+		let deserialized_scorer =
+			<ProbabilisticScorer>::read(&mut serialized_scorer, args).unwrap();
+		assert_eq!(deserialized_scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 475);
+
+		scorer.payment_path_failed(&payment_path_for_amount(250).iter().collect::<Vec<_>>(), 43);
+		assert_eq!(scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 300);
+
+		SinceEpoch::advance(Duration::from_secs(10));
+		assert_eq!(deserialized_scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 367);
+	}
 }
