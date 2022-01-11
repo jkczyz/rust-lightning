@@ -1721,7 +1721,117 @@ mod tests {
 		assert_eq!(scorer.channel_penalty_msat(43, 250, 1_000, &target, &recipient), 300);
 	}
 
-	// TODO: Add test coverage for offset decay
+	#[test]
+	fn decays_liquidity_bounds_over_time() {
+		let network_graph = network_graph();
+		let params = ProbabilisticScoringParameters {
+			liquidity_penalty_multiplier_msat: 1_000,
+			liquidity_offset_half_life: Duration::from_secs(10),
+		};
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
+		let source = source_node_id();
+		let target = target_node_id();
+
+		assert_eq!(scorer.channel_penalty_msat(42, 0, 1_024, &source, &target), 0);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_010);
+
+		scorer.payment_path_failed(&payment_path_for_amount(768).iter().collect::<Vec<_>>(), 42);
+		scorer.payment_path_failed(&payment_path_for_amount(128).iter().collect::<Vec<_>>(), 43);
+
+		assert_eq!(scorer.channel_penalty_msat(42, 128, 1_024, &source, &target), 0);
+		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 92);
+		assert_eq!(scorer.channel_penalty_msat(42, 768, 1_024, &source, &target), 1_424);
+		assert_eq!(scorer.channel_penalty_msat(42, 896, 1_024, &source, &target), u64::max_value());
+
+		SinceEpoch::advance(Duration::from_secs(9));
+		assert_eq!(scorer.channel_penalty_msat(42, 128, 1_024, &source, &target), 0);
+		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 92);
+		assert_eq!(scorer.channel_penalty_msat(42, 768, 1_024, &source, &target), 1_424);
+		assert_eq!(scorer.channel_penalty_msat(42, 896, 1_024, &source, &target), u64::max_value());
+
+		SinceEpoch::advance(Duration::from_secs(1));
+		assert_eq!(scorer.channel_penalty_msat(42, 64, 1_024, &source, &target), 0);
+		assert_eq!(scorer.channel_penalty_msat(42, 128, 1_024, &source, &target), 34);
+		assert_eq!(scorer.channel_penalty_msat(42, 896, 1_024, &source, &target), 1_812);
+		assert_eq!(scorer.channel_penalty_msat(42, 960, 1_024, &source, &target), u64::max_value());
+
+		// Fully decay liquidity lower bound.
+		SinceEpoch::advance(Duration::from_secs(10 * 7));
+		assert_eq!(scorer.channel_penalty_msat(42, 0, 1_024, &source, &target), 0);
+		assert_eq!(scorer.channel_penalty_msat(42, 1, 1_024, &source, &target), 0);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_023, 1_024, &source, &target), 2_709);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_010);
+
+		// Fully decay liquidity upper bound.
+		SinceEpoch::advance(Duration::from_secs(10));
+		assert_eq!(scorer.channel_penalty_msat(42, 0, 1_024, &source, &target), 0);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_010);
+
+		SinceEpoch::advance(Duration::from_secs(10));
+		assert_eq!(scorer.channel_penalty_msat(42, 0, 1_024, &source, &target), 0);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_010);
+	}
+
+	#[test]
+	fn decays_liquidity_bounds_without_shift_overflow() {
+		let network_graph = network_graph();
+		let params = ProbabilisticScoringParameters {
+			liquidity_penalty_multiplier_msat: 1_000,
+			liquidity_offset_half_life: Duration::from_secs(10),
+		};
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
+		let source = source_node_id();
+		let target = target_node_id();
+		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 124);
+
+		scorer.payment_path_failed(&payment_path_for_amount(512).iter().collect::<Vec<_>>(), 42);
+		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 281);
+
+		// An unchecked right shift 64 bits or more in DirectedChannelLiquidity::decayed_offset_msat
+		// would cause an overflow.
+		SinceEpoch::advance(Duration::from_secs(10 * 64));
+		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 124);
+
+		SinceEpoch::advance(Duration::from_secs(10));
+		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 124);
+	}
+
+	#[test]
+	fn restricts_liquidity_bounds_after_decay() {
+		let network_graph = network_graph();
+		let params = ProbabilisticScoringParameters {
+			liquidity_penalty_multiplier_msat: 1_000,
+			liquidity_offset_half_life: Duration::from_secs(10),
+		};
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
+		let source = source_node_id();
+		let target = target_node_id();
+
+		assert_eq!(scorer.channel_penalty_msat(42, 512, 1_024, &source, &target), 300);
+
+		// More knowledge gives higher confidence (256, 768), meaning a lower penalty.
+		scorer.payment_path_failed(&payment_path_for_amount(768).iter().collect::<Vec<_>>(), 42);
+		scorer.payment_path_failed(&payment_path_for_amount(256).iter().collect::<Vec<_>>(), 43);
+		assert_eq!(scorer.channel_penalty_msat(42, 512, 1_024, &source, &target), 281);
+
+		// Decaying knowledge gives less confidence (128, 896), meaning a higher penalty.
+		SinceEpoch::advance(Duration::from_secs(10));
+		assert_eq!(scorer.channel_penalty_msat(42, 512, 1_024, &source, &target), 293);
+
+		// Reducing the upper bound gives more confidence (128, 832) that the payment amount (512)
+		// is closer to the upper bound, meaning a higher penalty.
+		scorer.payment_path_successful(&payment_path_for_amount(64).iter().collect::<Vec<_>>());
+		assert_eq!(scorer.channel_penalty_msat(42, 512, 1_024, &source, &target), 333);
+
+		// Increasing the lower bound gives more confidence (256, 832) that the payment amount (512)
+		// is closer to the lower bound, meaning a lower penalty.
+		scorer.payment_path_failed(&payment_path_for_amount(256).iter().collect::<Vec<_>>(), 43);
+		assert_eq!(scorer.channel_penalty_msat(42, 512, 1_024, &source, &target), 247);
+
+		// Further decaying affects the lower bound more than the upper bound (128, 928).
+		SinceEpoch::advance(Duration::from_secs(10));
+		assert_eq!(scorer.channel_penalty_msat(42, 512, 1_024, &source, &target), 280);
+	}
 
 	// TODO: Add test coverage for serialization
 }
