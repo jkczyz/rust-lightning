@@ -32,14 +32,14 @@
 //! #
 //! // Use the default channel penalties.
 //! let params = ProbabilisticScoringParameters::default();
-//! let scorer = ProbabilisticScorer::new(params, payer, &network_graph);
+//! let scorer = ProbabilisticScorer::new(params, &payer, &network_graph);
 //!
 //! // Or use custom channel penalties.
 //! let params = ProbabilisticScoringParameters {
 //!     liquidity_penalty_multiplier_msat: 2 * 1000,
 //!     ..ProbabilisticScoringParameters::default()
 //! };
-//! let scorer = ProbabilisticScorer::new(params, payer, &network_graph);
+//! let scorer = ProbabilisticScorer::new(params, &payer, &network_graph);
 //!
 //! let route = find_route(&payer, &route_params, &network_graph, None, &logger, &scorer);
 //! # }
@@ -515,11 +515,11 @@ impl<G: Deref<Target = NetworkGraph>> ProbabilisticScorer<G> {
 	/// Creates a new scorer using the given scoring parameters for sending payments from a node
 	/// through a network graph.
 	pub fn new(
-		params: ProbabilisticScoringParameters, node_pubkey: PublicKey, network_graph: G
+		params: ProbabilisticScoringParameters, node_pubkey: &PublicKey, network_graph: G
 	) -> Self {
 		Self {
 			params,
-			node_id: NodeId::from_pubkey(&node_pubkey),
+			node_id: NodeId::from_pubkey(node_pubkey),
 			network_graph,
 			channel_liquidities: HashMap::new(),
 		}
@@ -1334,7 +1334,7 @@ mod tests {
 	fn liquidity_bounds_directed_from_lowest_node_id() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let mut scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph)
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph)
 			.with_channel(42,
 				ChannelLiquidity {
 					min_liquidity_offset_msat: 700, max_liquidity_offset_msat: 100
@@ -1378,7 +1378,7 @@ mod tests {
 	fn resets_liquidity_upper_bound_when_crossed_by_lower_bound() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let mut scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph)
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph)
 			.with_channel(42,
 				ChannelLiquidity {
 					min_liquidity_offset_msat: 200, max_liquidity_offset_msat: 400
@@ -1433,7 +1433,7 @@ mod tests {
 	fn resets_liquidity_lower_bound_when_crossed_by_upper_bound() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let mut scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph)
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph)
 			.with_channel(42,
 				ChannelLiquidity {
 					min_liquidity_offset_msat: 200, max_liquidity_offset_msat: 400
@@ -1488,7 +1488,7 @@ mod tests {
 	fn increased_penalty_nearing_liquidity_upper_bound() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph);
+		let scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
 		let source = source_node_id();
 		let target = target_node_id();
 
@@ -1510,7 +1510,7 @@ mod tests {
 	fn constant_penalty_outside_liquidity_bounds() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph)
+		let scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph)
 			.with_channel(42,
 				ChannelLiquidity { min_liquidity_offset_msat: 40, max_liquidity_offset_msat: 40 });
 		let source = source_node_id();
@@ -1526,7 +1526,7 @@ mod tests {
 	fn does_not_penalize_own_channel() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let mut scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph);
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
 		let sender = sender_node_id();
 		let source = source_node_id();
 		let failed_path = payment_path_for_amount(500);
@@ -1545,7 +1545,7 @@ mod tests {
 	fn sets_liquidity_lower_bound_on_downstream_failure() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let mut scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph);
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
 		let source = source_node_id();
 		let target = target_node_id();
 		let path = payment_path_for_amount(500);
@@ -1565,7 +1565,7 @@ mod tests {
 	fn sets_liquidity_upper_bound_on_failure() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let mut scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph);
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
 		let source = source_node_id();
 		let target = target_node_id();
 		let path = payment_path_for_amount(500);
@@ -1585,7 +1585,7 @@ mod tests {
 	fn reduces_liquidity_upper_bound_along_path_on_success() {
 		let network_graph = network_graph();
 		let params = ProbabilisticScoringParameters::default();
-		let mut scorer = ProbabilisticScorer::new(params, sender_pubkey(), &network_graph);
+		let mut scorer = ProbabilisticScorer::new(params, &sender_pubkey(), &network_graph);
 		let sender = sender_node_id();
 		let source = source_node_id();
 		let target = target_node_id();
