@@ -1495,7 +1495,7 @@ where L::Target: Logger {
 
 #[cfg(test)]
 mod tests {
-	use routing::scoring::Score;
+	use routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParameters, Score};
 	use routing::network_graph::{NetworkGraph, NetGraphMsgHandler, NodeId};
 	use routing::router::{get_route, Payee, Route, RouteHint, RouteHintHop, RouteHop, RoutingFees};
 	use chain::transaction::OutPoint;
@@ -4840,7 +4840,6 @@ mod tests {
 			},
 		};
 		let graph = NetworkGraph::read(&mut d).unwrap();
-		let scorer = test_utils::TestScorer::with_fixed_penalty(0);
 
 		// First, get 100 (source, destination) pairs for which route-getting actually succeeds...
 		let mut seed = random_init_seed() as usize;
@@ -4853,6 +4852,8 @@ mod tests {
 				let dst = PublicKey::from_slice(nodes.keys().skip(seed % nodes.len()).next().unwrap().as_slice()).unwrap();
 				let payee = Payee::from_node_id(dst);
 				let amt = seed as u64 % 200_000_000;
+				let params = ProbabilisticScoringParameters::default();
+				let scorer = ProbabilisticScorer::new(params, &src, &graph);
 				if get_route(src, &payee, &graph, None, amt, 42, &test_utils::TestLogger::new(), &scorer).is_ok() {
 					continue 'load_endpoints;
 				}
@@ -4871,7 +4872,6 @@ mod tests {
 			},
 		};
 		let graph = NetworkGraph::read(&mut d).unwrap();
-		let scorer = test_utils::TestScorer::with_fixed_penalty(0);
 
 		// First, get 100 (source, destination) pairs for which route-getting actually succeeds...
 		let mut seed = random_init_seed() as usize;
@@ -4884,6 +4884,8 @@ mod tests {
 				let dst = PublicKey::from_slice(nodes.keys().skip(seed % nodes.len()).next().unwrap().as_slice()).unwrap();
 				let payee = Payee::from_node_id(dst).with_features(InvoiceFeatures::known());
 				let amt = seed as u64 % 200_000_000;
+				let params = ProbabilisticScoringParameters::default();
+				let scorer = ProbabilisticScorer::new(params, &src, &graph);
 				if get_route(src, &payee, &graph, None, amt, 42, &test_utils::TestLogger::new(), &scorer).is_ok() {
 					continue 'load_endpoints;
 				}
@@ -4922,7 +4924,7 @@ pub(crate) mod test_utils {
 #[cfg(all(test, feature = "unstable", not(feature = "no-std")))]
 mod benches {
 	use super::*;
-	use routing::scoring::Scorer;
+	use routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParameters};
 	use util::logger::{Logger, Record};
 
 	use test::Bencher;
@@ -4937,7 +4939,6 @@ mod benches {
 		let mut d = test_utils::get_route_file().unwrap();
 		let graph = NetworkGraph::read(&mut d).unwrap();
 		let nodes = graph.read_only().nodes().clone();
-		let scorer = Scorer::with_fixed_penalty(0);
 
 		// First, get 100 (source, destination) pairs for which route-getting actually succeeds...
 		let mut path_endpoints = Vec::new();
@@ -4950,6 +4951,8 @@ mod benches {
 				let dst = PublicKey::from_slice(nodes.keys().skip(seed % nodes.len()).next().unwrap().as_slice()).unwrap();
 				let payee = Payee::from_node_id(dst);
 				let amt = seed as u64 % 1_000_000;
+				let params = ProbabilisticScoringParameters::default();
+				let scorer = ProbabilisticScorer::new(params, &src, &graph);
 				if get_route(&src, &payee, &graph, None, amt, 42, &DummyLogger{}, &scorer).is_ok() {
 					path_endpoints.push((src, dst, amt));
 					continue 'load_endpoints;
@@ -4962,6 +4965,8 @@ mod benches {
 		bench.iter(|| {
 			let (src, dst, amt) = path_endpoints[idx % path_endpoints.len()];
 			let payee = Payee::from_node_id(dst);
+			let params = ProbabilisticScoringParameters::default();
+			let scorer = ProbabilisticScorer::new(params, &src, &graph);
 			assert!(get_route(&src, &payee, &graph, None, amt, 42, &DummyLogger{}, &scorer).is_ok());
 			idx += 1;
 		});
@@ -4972,7 +4977,6 @@ mod benches {
 		let mut d = test_utils::get_route_file().unwrap();
 		let graph = NetworkGraph::read(&mut d).unwrap();
 		let nodes = graph.read_only().nodes().clone();
-		let scorer = Scorer::with_fixed_penalty(0);
 
 		// First, get 100 (source, destination) pairs for which route-getting actually succeeds...
 		let mut path_endpoints = Vec::new();
@@ -4985,6 +4989,8 @@ mod benches {
 				let dst = PublicKey::from_slice(nodes.keys().skip(seed % nodes.len()).next().unwrap().as_slice()).unwrap();
 				let payee = Payee::from_node_id(dst).with_features(InvoiceFeatures::known());
 				let amt = seed as u64 % 1_000_000;
+				let params = ProbabilisticScoringParameters::default();
+				let scorer = ProbabilisticScorer::new(params, &src, &graph);
 				if get_route(&src, &payee, &graph, None, amt, 42, &DummyLogger{}, &scorer).is_ok() {
 					path_endpoints.push((src, dst, amt));
 					continue 'load_endpoints;
@@ -4997,6 +5003,8 @@ mod benches {
 		bench.iter(|| {
 			let (src, dst, amt) = path_endpoints[idx % path_endpoints.len()];
 			let payee = Payee::from_node_id(dst).with_features(InvoiceFeatures::known());
+			let params = ProbabilisticScoringParameters::default();
+			let scorer = ProbabilisticScorer::new(params, &src, &graph);
 			assert!(get_route(&src, &payee, &graph, None, amt, 42, &DummyLogger{}, &scorer).is_ok());
 			idx += 1;
 		});
