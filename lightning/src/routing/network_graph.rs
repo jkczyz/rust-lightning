@@ -687,6 +687,7 @@ impl_writeable_tlv_based!(ChannelInfo, {
 
 /// A wrapper around [`ChannelInfo`] representing information about the channel as directed from a
 /// source node to a target node.
+#[derive(Clone, Debug)]
 pub struct DirectedChannelInfo<'a: 'b, 'b> {
 	channel: &'a ChannelInfo,
 	direction: Option<&'b DirectionalChannelInfo>,
@@ -695,16 +696,17 @@ pub struct DirectedChannelInfo<'a: 'b, 'b> {
 }
 
 impl<'a: 'b, 'b> DirectedChannelInfo<'a, 'b> {
+	/// Returns information for the channel.
+	pub fn channel(&self) -> &'a ChannelInfo { self.channel }
+
+	/// Returns information for the direction.
+	pub fn direction(&self) -> Option<&'b DirectionalChannelInfo> { self.direction }
+
 	/// Returns the node id for the source.
 	pub fn source(&self) -> &'b NodeId { self.source }
 
 	/// Returns the node id for the target.
 	pub fn target(&self) -> &'b NodeId { self.target }
-
-	/// Consumes the [`DirectedChannelInfo`], returning the wrapped parts.
-	pub fn into_parts(self) -> (&'a ChannelInfo, Option<&'b DirectionalChannelInfo>) {
-		(self.channel, self.direction)
-	}
 
 	/// Returns the [`EffectiveCapacity`] of the channel in a specific direction.
 	///
@@ -712,17 +714,8 @@ impl<'a: 'b, 'b> DirectedChannelInfo<'a, 'b> {
 	/// `htlc_maximum_msat` for the direction as advertised by the gossip network, if known,
 	/// whichever is smaller.
 	pub fn effective_capacity(&self) -> EffectiveCapacity {
-		Self::effective_capacity_from_parts(self.channel, self.direction)
-	}
-
-	/// Returns the [`EffectiveCapacity`] of the channel in the given direction.
-	///
-	/// See [`Self::effective_capacity`] for details.
-	pub fn effective_capacity_from_parts(
-		channel: &ChannelInfo, direction: Option<&DirectionalChannelInfo>
-	) -> EffectiveCapacity {
-		let capacity_msat = channel.capacity_sats.map(|capacity_sats| capacity_sats * 1000);
-		direction
+		let capacity_msat = self.channel.capacity_sats.map(|capacity_sats| capacity_sats * 1000);
+		self.direction
 			.and_then(|direction| direction.htlc_maximum_msat)
 			.map(|max_htlc_msat| {
 				let capacity_msat = capacity_msat.unwrap_or(u64::max_value());

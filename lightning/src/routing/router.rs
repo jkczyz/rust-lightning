@@ -18,7 +18,7 @@ use ln::channelmanager::ChannelDetails;
 use ln::features::{ChannelFeatures, InvoiceFeatures, NodeFeatures};
 use ln::msgs::{DecodeError, ErrorAction, LightningError, MAX_VALUE_MSAT};
 use routing::scoring::Score;
-use routing::network_graph::{ChannelInfo, DirectedChannelInfo, DirectionalChannelInfo, EffectiveCapacity, NetworkGraph, NodeId, RoutingFees};
+use routing::network_graph::{DirectedChannelInfo, EffectiveCapacity, NetworkGraph, NodeId, RoutingFees};
 use util::ser::{Writeable, Readable};
 use util::logger::{Level, Logger};
 
@@ -339,9 +339,8 @@ enum CandidateRouteHop<'a> {
 	},
 	/// A hop found in the [`NetworkGraph`], where the channel capacity may or may not be known.
 	PublicHop {
+		info: DirectedChannelInfo<'a, 'a>,
 		short_channel_id: u64,
-		channel: &'a ChannelInfo,
-		direction: &'a DirectionalChannelInfo,
 	},
 	/// A hop to the payee found in the payment invoice, though not necessarily a direct channel.
 	PrivateHop {
@@ -361,7 +360,7 @@ impl<'a> CandidateRouteHop<'a> {
 	fn features(&self) -> ChannelFeatures {
 		match self {
 			CandidateRouteHop::FirstHop { details } => details.counterparty.features.to_context(),
-			CandidateRouteHop::PublicHop { channel, .. } => channel.features.clone(),
+			CandidateRouteHop::PublicHop { info, .. } => info.channel().features.clone(),
 			CandidateRouteHop::PrivateHop { .. } => ChannelFeatures::empty(),
 		}
 	}
@@ -369,7 +368,9 @@ impl<'a> CandidateRouteHop<'a> {
 	fn cltv_expiry_delta(&self) -> u32 {
 		match self {
 			CandidateRouteHop::FirstHop { .. } => 0,
-			CandidateRouteHop::PublicHop { direction, .. } => direction.cltv_expiry_delta as u32,
+			CandidateRouteHop::PublicHop { info, .. } => {
+				info.direction().unwrap().cltv_expiry_delta as u32
+			},
 			CandidateRouteHop::PrivateHop { hint } => hint.cltv_expiry_delta as u32,
 		}
 	}
@@ -377,7 +378,9 @@ impl<'a> CandidateRouteHop<'a> {
 	fn htlc_minimum_msat(&self) -> u64 {
 		match self {
 			CandidateRouteHop::FirstHop { .. } => 0,
-			CandidateRouteHop::PublicHop { direction, .. } => direction.htlc_minimum_msat,
+			CandidateRouteHop::PublicHop { info, .. } => {
+				info.direction().unwrap().htlc_minimum_msat
+			},
 			CandidateRouteHop::PrivateHop { hint } => hint.htlc_minimum_msat.unwrap_or(0),
 		}
 	}
@@ -387,7 +390,7 @@ impl<'a> CandidateRouteHop<'a> {
 			CandidateRouteHop::FirstHop { .. } => RoutingFees {
 				base_msat: 0, proportional_millionths: 0,
 			},
-			CandidateRouteHop::PublicHop { direction, .. } => direction.fees,
+			CandidateRouteHop::PublicHop { info, .. } => info.direction().unwrap().fees,
 			CandidateRouteHop::PrivateHop { hint } => hint.fees,
 		}
 	}
@@ -397,9 +400,7 @@ impl<'a> CandidateRouteHop<'a> {
 			CandidateRouteHop::FirstHop { details } => EffectiveCapacity::ExactLiquidity {
 				liquidity_msat: details.outbound_capacity_msat,
 			},
-			CandidateRouteHop::PublicHop { channel, direction, .. } => {
-				DirectedChannelInfo::effective_capacity_from_parts(channel, Some(direction))
-			},
+			CandidateRouteHop::PublicHop { info, .. } => info.effective_capacity(),
 			CandidateRouteHop::PrivateHop { .. } => EffectiveCapacity::Infinite,
 		}
 	}
@@ -1054,13 +1055,11 @@ where L::Target: Logger {
 							let source = directed_channel.source();
 							let target = directed_channel.target();
 							if first_hops.is_none() || *source != our_node_id {
-								let (channel, direction) = directed_channel.into_parts();
-								if let Some(direction) = direction {
+								if let Some(direction) = directed_channel.direction() {
 									if direction.enabled {
 										let candidate = CandidateRouteHop::PublicHop {
+											info: directed_channel,
 											short_channel_id: *chan_id,
-											channel,
-											direction,
 										};
 										add_entry!(candidate, *source, *target, $fee_to_target_msat, $next_hops_value_contribution, $next_hops_path_htlc_minimum_msat, $next_hops_path_penalty_msat);
 									}
@@ -1135,14 +1134,10 @@ where L::Target: Logger {
 					let target = NodeId::from_pubkey(&prev_hop_id);
 					let candidate = network_channels
 						.get(&hop.short_channel_id)
-						.and_then(|channel| channel.as_directed_to(&target).map(|d| d.into_parts()))
-						.and_then(|(channel, direction)| {
-							direction.map(|direction|
-								CandidateRouteHop::PublicHop {
-									short_channel_id: hop.short_channel_id,
-									channel,
-									direction,
-								})
+						.and_then(|channel| channel.as_directed_to(&target))
+						.map(|info| CandidateRouteHop::PublicHop {
+							info,
+							short_channel_id: hop.short_channel_id,
 						})
 						.unwrap_or_else(|| CandidateRouteHop::PrivateHop { hint: hop });
 					let capacity_msat = candidate.effective_capacity().as_msat();
