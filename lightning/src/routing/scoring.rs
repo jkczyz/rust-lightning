@@ -718,6 +718,35 @@ impl<L: DerefMut<Target = u64>, T: Time, U: DerefMut<Target = T>> DirectedChanne
 	}
 }
 
+const FRACTIONAL_BITS: u32 = 3;
+const FRACTIONAL_BITMASK: u64 = (1 << FRACTIONAL_BITS) - 1;
+const LOG2_FRACTIONAL_PART: [f64; 1 << FRACTIONAL_BITS] =
+	[0.0, 0.17, 0.32, 0.46, 0.58, 0.70, 0.81, 0.91];
+const LOG2_10: f64 = 3.32;
+
+fn log10_approx(numerator: u64, denominator: u64) -> f64 {
+	(log2_approx(numerator) - log2_approx(denominator)) / LOG2_10
+}
+
+#[inline]
+fn log2_approx(x: u64) -> f64 {
+	let leading_zeros = x.leading_zeros();
+	let integer_part = (63 - leading_zeros) as f64;
+	let fractional_part = LOG2_FRACTIONAL_PART[
+		(((x << leading_zeros) >> (63 - FRACTIONAL_BITS)) & FRACTIONAL_BITMASK) as usize
+	];
+	integer_part + fractional_part
+}
+
+fn log10_approx_without_fractional(numerator: u64, denominator: u64) -> f64 {
+	(log2_approx_without_fractional(numerator) - log2_approx_without_fractional(denominator)) / LOG2_10
+}
+
+#[inline]
+fn log2_approx_without_fractional(x: u64) -> f64 {
+	(63 - x.leading_zeros()) as f64
+}
+
 impl<G: Deref<Target = NetworkGraph>, T: Time> Score for ProbabilisticScorerUsingTime<G, T> {
 	fn channel_penalty_msat(
 		&self, short_channel_id: u64, amount_msat: u64, capacity_msat: u64, source: &NodeId,
@@ -738,8 +767,8 @@ impl<G: Deref<Target = NetworkGraph>, T: Time> Score for ProbabilisticScorerUsin
 			Probability::Zero => u64::max_value(),
 			Probability::One => 0,
 			Probability::Ratio { numerator, denominator } => {
-				let success_probability = numerator as f64 / denominator as f64;
-				(-(success_probability.log10()) * liquidity_penalty_multiplier_msat as f64) as u64
+				let log_success_probability = log10_approx(numerator, denominator);
+				(-log_success_probability * liquidity_penalty_multiplier_msat as f64) as u64
 			},
 		}
 	}
@@ -1738,43 +1767,43 @@ mod tests {
 		let target = target_node_id();
 
 		assert_eq!(scorer.channel_penalty_msat(42, 0, 1_024, &source, &target), 0);
-		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_010);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_012);
 
 		scorer.payment_path_failed(&payment_path_for_amount(768).iter().collect::<Vec<_>>(), 42);
 		scorer.payment_path_failed(&payment_path_for_amount(128).iter().collect::<Vec<_>>(), 43);
 
 		assert_eq!(scorer.channel_penalty_msat(42, 128, 1_024, &source, &target), 0);
-		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 92);
-		assert_eq!(scorer.channel_penalty_msat(42, 768, 1_024, &source, &target), 1_424);
+		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 96);
+		assert_eq!(scorer.channel_penalty_msat(42, 768, 1_024, &source, &target), 1_427);
 		assert_eq!(scorer.channel_penalty_msat(42, 896, 1_024, &source, &target), u64::max_value());
 
 		SinceEpoch::advance(Duration::from_secs(9));
 		assert_eq!(scorer.channel_penalty_msat(42, 128, 1_024, &source, &target), 0);
-		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 92);
-		assert_eq!(scorer.channel_penalty_msat(42, 768, 1_024, &source, &target), 1_424);
+		assert_eq!(scorer.channel_penalty_msat(42, 256, 1_024, &source, &target), 96);
+		assert_eq!(scorer.channel_penalty_msat(42, 768, 1_024, &source, &target), 1_427);
 		assert_eq!(scorer.channel_penalty_msat(42, 896, 1_024, &source, &target), u64::max_value());
 
 		SinceEpoch::advance(Duration::from_secs(1));
 		assert_eq!(scorer.channel_penalty_msat(42, 64, 1_024, &source, &target), 0);
-		assert_eq!(scorer.channel_penalty_msat(42, 128, 1_024, &source, &target), 34);
-		assert_eq!(scorer.channel_penalty_msat(42, 896, 1_024, &source, &target), 1_812);
+		assert_eq!(scorer.channel_penalty_msat(42, 128, 1_024, &source, &target), 36);
+		assert_eq!(scorer.channel_penalty_msat(42, 896, 1_024, &source, &target), 1_807);
 		assert_eq!(scorer.channel_penalty_msat(42, 960, 1_024, &source, &target), u64::max_value());
 
 		// Fully decay liquidity lower bound.
 		SinceEpoch::advance(Duration::from_secs(10 * 7));
 		assert_eq!(scorer.channel_penalty_msat(42, 0, 1_024, &source, &target), 0);
 		assert_eq!(scorer.channel_penalty_msat(42, 1, 1_024, &source, &target), 0);
-		assert_eq!(scorer.channel_penalty_msat(42, 1_023, 1_024, &source, &target), 2_709);
-		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_010);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_023, 1_024, &source, &target), 2_710);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_012);
 
 		// Fully decay liquidity upper bound.
 		SinceEpoch::advance(Duration::from_secs(10));
 		assert_eq!(scorer.channel_penalty_msat(42, 0, 1_024, &source, &target), 0);
-		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_010);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_012);
 
 		SinceEpoch::advance(Duration::from_secs(10));
 		assert_eq!(scorer.channel_penalty_msat(42, 0, 1_024, &source, &target), 0);
-		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_010);
+		assert_eq!(scorer.channel_penalty_msat(42, 1_024, 1_024, &source, &target), 3_012);
 	}
 
 	#[test]
@@ -1898,5 +1927,40 @@ mod tests {
 
 		SinceEpoch::advance(Duration::from_secs(10));
 		assert_eq!(deserialized_scorer.channel_penalty_msat(42, 500, 1_000, &source, &target), 367);
+	}
+}
+
+#[cfg(all(test, feature = "unstable", not(feature = "no-std")))]
+mod benches {
+	use super::*;
+
+	use test::black_box;
+	use test::Bencher;
+
+	#[bench]
+	fn log10_bench(bench: &mut Bencher) {
+		bench.iter(|| {
+			for i in 1..85_184 {
+				black_box((i as f64 / 85_184 as f64).log10());
+			}
+		});
+	}
+
+	#[bench]
+	fn log10_approx_bench(bench: &mut Bencher) {
+		bench.iter(|| {
+			for i in 1..85_184 {
+				black_box(log10_approx(i, 85_184));
+			}
+		});
+	}
+
+	#[bench]
+	fn log10_approx_without_fractional_bench(bench: &mut Bencher) {
+		bench.iter(|| {
+			for i in 1..85_184 {
+				black_box(log10_approx_without_fractional(i, 85_184));
+			}
+		});
 	}
 }
