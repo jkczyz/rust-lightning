@@ -4924,6 +4924,11 @@ pub(crate) mod test_utils {
 #[cfg(all(test, feature = "unstable", not(feature = "no-std")))]
 mod benches {
 	use super::*;
+	use bitcoin::hashes::Hash;
+	use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+	use chain::transaction::OutPoint;
+	use ln::channelmanager::{ChannelCounterparty, ChannelDetails};
+	use ln::features::{InitFeatures, InvoiceFeatures};
 	use routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParameters};
 	use util::logger::{Logger, Record};
 
@@ -4934,11 +4939,73 @@ mod benches {
 		fn log(&self, _record: &Record) {}
 	}
 
+	struct ZeroPenaltyScorer;
+	impl Score for ZeroPenaltyScorer {
+		fn channel_penalty_msat(
+			&self, _short_channel_id: u64, _send_amt: u64, _capacity_msat: u64, _source: &NodeId, _target: &NodeId
+		) -> u64 { 0 }
+		fn payment_path_failed(&mut self, _path: &[&RouteHop], _short_channel_id: u64) {}
+		fn payment_path_successful(&mut self, _path: &[&RouteHop]) {}
+	}
+
+	fn payer_pubkey() -> PublicKey {
+		let secp_ctx = Secp256k1::new();
+		PublicKey::from_secret_key(&secp_ctx, &SecretKey::from_slice(&[42; 32]).unwrap())
+	}
+
+	#[inline]
+	fn first_hop(node_id: PublicKey) -> ChannelDetails {
+		ChannelDetails {
+			channel_id: [0; 32],
+			counterparty: ChannelCounterparty {
+				features: InitFeatures::known(),
+				node_id,
+				unspendable_punishment_reserve: 0,
+				forwarding_info: None,
+			},
+			funding_txo: Some(OutPoint {
+				txid: bitcoin::Txid::from_slice(&[0; 32]).unwrap(), index: 0
+			}),
+			short_channel_id: Some(1),
+			channel_value_satoshis: 10_000_000,
+			user_channel_id: 0,
+			balance_msat: 10_000_000,
+			outbound_capacity_msat: 10_000_000,
+			inbound_capacity_msat: 0,
+			unspendable_punishment_reserve: None,
+			confirmations_required: None,
+			force_close_spend_delay: None,
+			is_outbound: true,
+			is_funding_locked: true,
+			is_usable: true,
+			is_public: true,
+		}
+	}
+
+	fn create_probabilistic_scorer<'a, 'b>(
+		payer: &'a PublicKey, network_graph: &'b NetworkGraph
+	) -> ProbabilisticScorer<&'b NetworkGraph> {
+		let params = ProbabilisticScoringParameters::default();
+		ProbabilisticScorer::new(params, payer, network_graph)
+	}
+
 	#[bench]
-	fn generate_routes(bench: &mut Bencher) {
+	fn generate_routes_with_probabilistic_scorer(bench: &mut Bencher) {
+		generate_routes(bench, create_probabilistic_scorer, None);
+	}
+
+	fn generate_routes<F, S>(
+		bench: &mut Bencher, create_scorer: F, features: Option<InvoiceFeatures>
+	) where
+		F: FnOnce(&PublicKey, &NetworkGraph) -> S,
+		S: Score,
+	{
 		let mut d = test_utils::get_route_file().unwrap();
 		let graph = NetworkGraph::read(&mut d).unwrap();
 		let nodes = graph.read_only().nodes().clone();
+
+		let payer = payer_pubkey();
+		let scorer = create_scorer(&payer, &graph);
 
 		// First, get 100 (source, destination) pairs for which route-getting actually succeeds...
 		let mut path_endpoints = Vec::new();
@@ -4950,10 +5017,9 @@ mod benches {
 				seed *= 0xdeadbeef;
 				let dst = PublicKey::from_slice(nodes.keys().skip(seed % nodes.len()).next().unwrap().as_slice()).unwrap();
 				let payee = Payee::from_node_id(dst);
+				let first_hop = first_hop(src);
 				let amt = seed as u64 % 1_000_000;
-				let params = ProbabilisticScoringParameters::default();
-				let scorer = ProbabilisticScorer::new(params, &src, &graph);
-				if get_route(&src, &payee, &graph, None, amt, 42, &DummyLogger{}, &scorer).is_ok() {
+				if get_route(&payer, &payee, &graph, Some(&[&first_hop]), amt, 42, &DummyLogger{}, &scorer).is_ok() {
 					path_endpoints.push((src, dst, amt));
 					continue 'load_endpoints;
 				}
@@ -4965,9 +5031,8 @@ mod benches {
 		bench.iter(|| {
 			let (src, dst, amt) = path_endpoints[idx % path_endpoints.len()];
 			let payee = Payee::from_node_id(dst);
-			let params = ProbabilisticScoringParameters::default();
-			let scorer = ProbabilisticScorer::new(params, &src, &graph);
-			assert!(get_route(&src, &payee, &graph, None, amt, 42, &DummyLogger{}, &scorer).is_ok());
+			let first_hop = first_hop(src);
+			assert!(get_route(&payer, &payee, &graph, Some(&[&first_hop]), amt, 42, &DummyLogger{}, &scorer).is_ok());
 			idx += 1;
 		});
 	}
