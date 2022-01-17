@@ -198,6 +198,10 @@ impl<'a, S: Writeable> Writeable for MutexGuard<'a, S> {
 /// See [module-level documentation] for usage and [`ScoringParameters`] for customization.
 ///
 /// [module-level documentation]: crate::routing::scoring
+#[deprecated(
+	since = "0.0.105",
+	note = "ProbabilisticScorer should be used instead of Scorer.",
+)]
 pub type Scorer = ScorerUsingTime::<ConfiguredTime>;
 
 #[cfg(not(feature = "no-std"))]
