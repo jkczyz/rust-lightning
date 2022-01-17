@@ -4932,7 +4932,7 @@ mod benches {
 	use chain::transaction::OutPoint;
 	use ln::channelmanager::{ChannelCounterparty, ChannelDetails};
 	use ln::features::{InitFeatures, InvoiceFeatures};
-	use routing::scoring::Scorer;
+	use routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParameters, Scorer};
 	use util::logger::{Logger, Record};
 
 	use test::Bencher;
@@ -5015,6 +5015,22 @@ mod benches {
 	fn generate_mpp_routes_with_default_scorer(bench: &mut Bencher) {
 		let network_graph = read_network_graph();
 		let scorer = Scorer::default();
+		generate_routes(bench, &network_graph, scorer, InvoiceFeatures::known());
+	}
+
+	#[bench]
+	fn generate_routes_with_probabilistic_scorer(bench: &mut Bencher) {
+		let network_graph = read_network_graph();
+		let params = ProbabilisticScoringParameters::default();
+		let scorer = ProbabilisticScorer::new(params, &payer_pubkey(), &network_graph);
+		generate_routes(bench, &network_graph, scorer, InvoiceFeatures::empty());
+	}
+
+	#[bench]
+	fn generate_mpp_routes_with_probabilistic_scorer(bench: &mut Bencher) {
+		let network_graph = read_network_graph();
+		let params = ProbabilisticScoringParameters::default();
+		let scorer = ProbabilisticScorer::new(params, &payer_pubkey(), &network_graph);
 		generate_routes(bench, &network_graph, scorer, InvoiceFeatures::known());
 	}
 
