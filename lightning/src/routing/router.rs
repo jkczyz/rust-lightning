@@ -5009,7 +5009,7 @@ mod benches {
 				}
 			} else if amount > 750_000 {
 				for path in route.paths {
-					let short_channel_id = path[amount as usize % path.len()].short_channel_id;
+					let short_channel_id = path[path.len() / 2].short_channel_id;
 					scorer.payment_path_failed(&path.iter().collect::<Vec<_>>(), short_channel_id);
 				}
 			}
