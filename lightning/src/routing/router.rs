@@ -1472,10 +1472,11 @@ where L::Target: Logger {
 				cltv_expiry_delta: payment_hop.candidate.cltv_expiry_delta(),
 			})
 		}).collect::<Vec<_>>();
-		let mut prev_cltv_expiry_delta = final_cltv_expiry_delta;
-		for hop in path.iter_mut().rev() {
-			core::mem::swap(&mut prev_cltv_expiry_delta, &mut hop.as_mut().unwrap().cltv_expiry_delta);
-		}
+		// Propagate the cltv_expiry_delta one hop backwards since the delta from the current hop is
+		// applicable for the previous hop.
+		path.iter_mut().rev().fold(final_cltv_expiry_delta, |prev_cltv_expiry_delta, hop| {
+			core::mem::replace(&mut hop.as_mut().unwrap().cltv_expiry_delta, prev_cltv_expiry_delta)
+		});
 		selected_paths.push(path);
 	}
 
