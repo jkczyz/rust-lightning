@@ -582,9 +582,8 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq)]
-/// Details about one direction of a channel. Received
-/// within a channel update.
-pub struct DirectionalChannelInfo {
+/// Details about one direction of a channel as received within a [`ChannelUpdate`].
+pub struct ChannelUpdateInfo {
 	/// When the last update to the channel direction was issued.
 	/// Value is opaque, as set in the announcement.
 	pub last_update: u32,
@@ -605,14 +604,14 @@ pub struct DirectionalChannelInfo {
 	pub last_update_message: Option<ChannelUpdate>,
 }
 
-impl fmt::Display for DirectionalChannelInfo {
+impl fmt::Display for ChannelUpdateInfo {
 	fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
 		write!(f, "last_update {}, enabled {}, cltv_expiry_delta {}, htlc_minimum_msat {}, fees {:?}", self.last_update, self.enabled, self.cltv_expiry_delta, self.htlc_minimum_msat, self.fees)?;
 		Ok(())
 	}
 }
 
-impl_writeable_tlv_based!(DirectionalChannelInfo, {
+impl_writeable_tlv_based!(ChannelUpdateInfo, {
 	(0, last_update, required),
 	(2, enabled, required),
 	(4, cltv_expiry_delta, required),
@@ -631,11 +630,11 @@ pub struct ChannelInfo {
 	/// Source node of the first direction of a channel
 	pub node_one: NodeId,
 	/// Details about the first direction of a channel
-	pub one_to_two: Option<DirectionalChannelInfo>,
+	pub one_to_two: Option<ChannelUpdateInfo>,
 	/// Source node of the second direction of a channel
 	pub node_two: NodeId,
 	/// Details about the second direction of a channel
-	pub two_to_one: Option<DirectionalChannelInfo>,
+	pub two_to_one: Option<ChannelUpdateInfo>,
 	/// The channel capacity as seen on-chain, if chain lookup is available.
 	pub capacity_sats: Option<u64>,
 	/// An initial announcement of the channel
@@ -690,7 +689,7 @@ impl_writeable_tlv_based!(ChannelInfo, {
 #[derive(Clone, Debug)]
 pub struct DirectedChannelInfo<'a: 'b, 'b> {
 	channel: &'a ChannelInfo,
-	direction: Option<&'b DirectionalChannelInfo>,
+	direction: Option<&'b ChannelUpdateInfo>,
 	source: &'b NodeId,
 	target: &'b NodeId,
 }
@@ -700,7 +699,7 @@ impl<'a: 'b, 'b> DirectedChannelInfo<'a, 'b> {
 	pub fn channel(&self) -> &'a ChannelInfo { self.channel }
 
 	/// Returns information for the direction.
-	pub fn direction(&self) -> Option<&'b DirectionalChannelInfo> { self.direction }
+	pub fn direction(&self) -> Option<&'b ChannelUpdateInfo> { self.direction }
 
 	/// Returns the node id for the source.
 	pub fn source(&self) -> &'b NodeId { self.source }
@@ -1325,7 +1324,7 @@ impl NetworkGraph {
 						let last_update_message = if msg.excess_data.len() <= MAX_EXCESS_BYTES_FOR_RELAY
 							{ full_msg.cloned() } else { None };
 
-						let updated_channel_dir_info = DirectionalChannelInfo {
+						let updated_channel_update_info = ChannelUpdateInfo {
 							enabled: chan_enabled,
 							last_update: msg.timestamp,
 							cltv_expiry_delta: msg.cltv_expiry_delta,
@@ -1337,7 +1336,7 @@ impl NetworkGraph {
 							},
 							last_update_message
 						};
-						$target = Some(updated_channel_dir_info);
+						$target = Some(updated_channel_update_info);
 					}
 				}
 
