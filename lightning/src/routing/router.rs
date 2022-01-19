@@ -339,6 +339,7 @@ enum CandidateRouteHop<'a> {
 	},
 	/// A hop found in the [`NetworkGraph`], where the channel capacity may or may not be known.
 	PublicHop {
+		// `DirectedChannelInfo::direction` MUST NOT be `None`.
 		info: DirectedChannelInfo<'a, 'a>,
 		short_channel_id: u64,
 	},
@@ -1135,6 +1136,7 @@ where L::Target: Logger {
 					let candidate = network_channels
 						.get(&hop.short_channel_id)
 						.and_then(|channel| channel.as_directed_to(&target))
+						.and_then(|channel| channel.direction().map(|_| channel))
 						.map(|info| CandidateRouteHop::PublicHop {
 							info,
 							short_channel_id: hop.short_channel_id,
