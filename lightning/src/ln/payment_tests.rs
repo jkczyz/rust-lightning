@@ -723,7 +723,7 @@ fn get_ldk_payment_preimage() {
 
 	let payee = Payee::from_node_id(nodes[1].node.get_our_node_id())
 		.with_features(InvoiceFeatures::known());
-	let scorer = test_utils::TestScorer::with_fixed_penalty(0);
+	let scorer = test_utils::TestScorer::with_penalty(0);
 	let route = get_route(
 		&nodes[0].node.get_our_node_id(), &payee, &nodes[0].network_graph,
 		Some(&nodes[0].node.list_usable_channels().iter().collect::<Vec<_>>()),
