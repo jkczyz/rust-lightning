@@ -504,13 +504,6 @@ struct DirectedChannelLiquidity<L: Deref<Target = u64>> {
 	capacity_msat: u64,
 }
 
-/// The likelihood of an event occurring.
-enum Probability {
-	Zero,
-	One,
-	Ratio { numerator: u64, denominator: u64 },
-}
-
 impl<G: Deref<Target = NetworkGraph>> ProbabilisticScorer<G> {
 	/// Creates a new scorer using the given scoring parameters for sending payments from a node
 	/// through a network graph.
@@ -589,21 +582,17 @@ impl ChannelLiquidity {
 impl<L: Deref<Target = u64>> DirectedChannelLiquidity<L> {
 	/// Returns the success probability of routing the given HTLC `amount_msat` through the channel
 	/// in this direction.
-	fn success_probability(&self, amount_msat: u64) -> Probability {
+	fn success_probability(&self, amount_msat: u64) -> f64 {
 		let max_liquidity_msat = self.max_liquidity_msat();
 		let min_liquidity_msat = core::cmp::min(self.min_liquidity_msat(), max_liquidity_msat);
 		if amount_msat > max_liquidity_msat {
-			Probability::Zero
-		} else if amount_msat < min_liquidity_msat {
-			Probability::One
+			0.0
+		} else if amount_msat <= min_liquidity_msat {
+			1.0
 		} else {
 			let numerator = max_liquidity_msat + 1 - amount_msat;
 			let denominator = max_liquidity_msat + 1 - min_liquidity_msat;
-			if numerator == denominator {
-				Probability::One
-			} else {
-				Probability::Ratio { numerator, denominator }
-			}
+			numerator as f64 / denominator as f64
 		}
 	}
 
@@ -673,13 +662,12 @@ impl<G: Deref<Target = NetworkGraph>> Score for ProbabilisticScorer<G> {
 			.unwrap_or(&ChannelLiquidity::new())
 			.as_directed(source, target, capacity_msat)
 			.success_probability(amount_msat);
-		match success_probability {
-			Probability::Zero => u64::max_value(),
-			Probability::One => 0,
-			Probability::Ratio { numerator, denominator } => {
-				let success_probability = numerator as f64 / denominator as f64;
-				(-(success_probability.log10()) * liquidity_penalty_multiplier_msat as f64) as u64
-			},
+		if success_probability == 0.0 {
+			u64::max_value()
+		} else if success_probability == 1.0 {
+			0
+		} else {
+			(-(success_probability.log10()) * liquidity_penalty_multiplier_msat as f64) as u64
 		}
 	}
 
