@@ -195,6 +195,10 @@ pub struct FixedPenaltyScorer {
 	penalty_msat: u64,
 }
 
+impl_writeable_tlv_based!(FixedPenaltyScorer, {
+	(0, penalty_msat, required),
+});
+
 impl FixedPenaltyScorer {
 	/// Creates a new scorer using `penalty_msat`.
 	pub fn with_penalty(penalty_msat: u64) -> Self {
@@ -203,7 +207,7 @@ impl FixedPenaltyScorer {
 }
 
 impl Score for FixedPenaltyScorer {
-	fn channel_penalty_msat( &self, _: u64, _: u64, _: u64, _: &NodeId, _: &NodeId) -> u64 {
+	fn channel_penalty_msat(&self, _: u64, _: u64, _: u64, _: &NodeId, _: &NodeId) -> u64 {
 		self.penalty_msat
 	}
 
