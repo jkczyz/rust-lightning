@@ -718,25 +718,28 @@ impl<'a: 'b, 'b> DirectedChannelInfo<'a, 'b> {
 	/// Returns the node id for the target.
 	pub fn target(&self) -> &'b NodeId { self.target }
 
+	/// Returns the maximum HTLC amount allowed over the channel in a specific direction.
+	pub fn htlc_maximum_msat(&self) -> u64 {
+		let htlc_maximum_msat = self.direction.and_then(|direction| direction.htlc_maximum_msat);
+		let capacity_msat = self.channel.capacity_sats.map(|capacity_sats| capacity_sats * 1000);
+		htlc_maximum_msat
+			.zip(capacity_msat)
+			.map(|(htlc_maximum_msat, capacity_msat)| cmp::min(htlc_maximum_msat, capacity_msat))
+			.or_else(|| htlc_maximum_msat)
+			.or_else(|| capacity_msat)
+			.unwrap_or(EffectiveCapacity::Unknown.as_msat())
+	}
+
 	/// Returns the [`EffectiveCapacity`] of the channel in a specific direction.
 	///
 	/// This is either the total capacity from the funding transaction, if known, or the
 	/// `htlc_maximum_msat` for the direction as advertised by the gossip network, if known,
-	/// whichever is smaller.
+	/// whichever is larger.
 	pub fn effective_capacity(&self) -> EffectiveCapacity {
-		let capacity_msat = self.channel.capacity_sats.map(|capacity_sats| capacity_sats * 1000);
-		self.direction
-			.and_then(|direction| direction.htlc_maximum_msat)
-			.map(|max_htlc_msat| {
-				let capacity_msat = capacity_msat.unwrap_or(u64::max_value());
-				if max_htlc_msat < capacity_msat {
-					EffectiveCapacity::MaximumHTLC { amount_msat: max_htlc_msat }
-				} else {
-					EffectiveCapacity::Total { capacity_msat }
-				}
-			})
-			.or_else(|| capacity_msat.map(|capacity_msat|
-					EffectiveCapacity::Total { capacity_msat }))
+		self.channel.capacity_sats.map(|capacity_sats| capacity_sats * 1000)
+			.map(|capacity_msat| EffectiveCapacity::Total { capacity_msat })
+			.or_else(|| self.direction.and_then(|direction| direction.htlc_maximum_msat)
+				.map(|amount_msat| EffectiveCapacity::MaximumHTLC { amount_msat }))
 			.unwrap_or(EffectiveCapacity::Unknown)
 	}
 }
