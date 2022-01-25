@@ -999,7 +999,7 @@ where L::Target: Logger {
 							let effective_capacity_msat = $candidate.effective_capacity().as_msat();
 							let params = ChannelUseParameters {
 								amount_msat: amount_to_transfer_over_msat,
-								inflight_htlc_msat: effective_capacity_msat - available_liquidity_msat,
+								inflight_htlc_msat: effective_capacity_msat - available_liquidity.remaining_capacity_msat,
 								fees_msat: cmp::max(total_fee_msat, path_htlc_minimum_msat),
 								effective_capacity_msat,
 							};
