@@ -1769,9 +1769,9 @@ impl<Signer: Sign, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> ChannelMana
 	///
 	/// panics if channel_value_satoshis is >= `MAX_FUNDING_SATOSHIS`!
 	///
-	/// Users need to notify the new ChannelManager when a new block is connected or
-	/// disconnected using its `block_connected` and `block_disconnected` methods, starting
-	/// from after `params.latest_hash`.
+	/// Users need to notify the `ChannelManager` when new block data is available via either the
+	/// [`chain::Listen`] or [`chain::Confirm`] interface methods, starting from after the best
+	/// block hash found in `params`.
 	pub fn new(fee_est: F, chain_monitor: M, tx_broadcaster: T, logger: L, keys_manager: K, config: UserConfig, params: ChainParameters) -> Self {
 		let mut secp_ctx = Secp256k1::new();
 		secp_ctx.seeded_randomize(&keys_manager.get_secure_random_bytes());
