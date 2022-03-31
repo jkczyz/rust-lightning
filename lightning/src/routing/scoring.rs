@@ -668,8 +668,8 @@ impl<T: Time> ChannelLiquidity<T> {
 impl<L: Deref<Target = u64>, T: Time, U: Deref<Target = T>> DirectedChannelLiquidity<L, T, U> {
 	/// Returns a penalty for routing the given HTLC `amount_msat` through the channel in this
 	/// direction.
-	fn penalty_msat(&self, amount_msat: u64, liquidity_penalty_multiplier_msat: u64) -> u64 {
-		let max_penalty_msat = liquidity_penalty_multiplier_msat.saturating_mul(2);
+	fn penalty_msat(&self, amount_msat: u64, params: ProbabilisticScoringParameters) -> u64 {
+		let max_penalty_msat = params.liquidity_penalty_multiplier_msat.saturating_mul(2);
 		let max_liquidity_msat = self.max_liquidity_msat();
 		let min_liquidity_msat = core::cmp::min(self.min_liquidity_msat(), max_liquidity_msat);
 		if amount_msat <= min_liquidity_msat {
@@ -686,11 +686,28 @@ impl<L: Deref<Target = u64>, T: Time, U: Deref<Target = T>> DirectedChannelLiqui
 		} else {
 			let numerator = (max_liquidity_msat - amount_msat).saturating_add(1);
 			let denominator = (max_liquidity_msat - min_liquidity_msat).saturating_add(1);
-			let penalty_msat = approx::negative_log10_times_1024(numerator, denominator)
-				.saturating_mul(liquidity_penalty_multiplier_msat) / 1024;
-			// Upper bound the penalty to ensure some channel is selected.
-			penalty_msat.min(max_penalty_msat)
+			let negative_log10_times_1024 =
+				approx::negative_log10_times_1024(numerator, denominator);
+			self.liquidity_penalty_msat(negative_log10_times_1024, params)
+				.saturating_add(self.amount_penalty_msat(amount_msat, negative_log10_times_1024, params))
 		}
+	}
+
+	fn liquidity_penalty_msat(
+		&self, negative_log10_times_1024: u64, params: ProbabilisticScoringParameters
+	) -> u64 {
+		let multiplier_msat = params.liquidity_penalty_multiplier_msat;
+		let penalty_msat = negative_log10_times_1024.saturating_mul(multiplier_msat) / 1024;
+
+		// Upper bound the penalty to ensure some channel is selected.
+		let max_penalty_msat = multiplier_msat.saturating_mul(2);
+		penalty_msat.min(max_penalty_msat)
+	}
+
+	fn amount_penalty_msat(
+		&self, amount_msat: u64, negative_log10_times_1024: u64, params: ProbabilisticScoringParameters
+	) -> u64 {
+		negative_log10_times_1024.saturating_mul(amount_msat) / 1024 / 1024
 	}
 
 	/// Returns the lower bound of the channel liquidity balance in this direction.
@@ -768,7 +785,7 @@ impl<G: Deref<Target = NetworkGraph>, T: Time> Score for ProbabilisticScorerUsin
 			.get(&short_channel_id)
 			.unwrap_or(&ChannelLiquidity::new())
 			.as_directed(source, target, capacity_msat, liquidity_offset_half_life)
-			.penalty_msat(amount_msat, liquidity_penalty_multiplier_msat)
+			.penalty_msat(amount_msat, self.params)
 			.saturating_add(self.params.base_penalty_msat)
 	}
 
