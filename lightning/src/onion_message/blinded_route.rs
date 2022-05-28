@@ -107,7 +107,7 @@ fn construct_blinded_route_keys<T: secp256k1::Signing + secp256k1::Verification>
 ) -> Result<Vec<([u8; 32], PublicKey)>, secp256k1::Error> {
 	let mut route_keys = Vec::with_capacity(unblinded_path.len());
 
-	utils::construct_keys_callback(secp_ctx, unblinded_path, session_priv, |blinded_hop_pubkey, _, _, _, encrypted_payload_ss| {
+	utils::construct_keys_callback(secp_ctx, unblinded_path, None, session_priv, |blinded_hop_pubkey, _, _, _, encrypted_payload_ss| {
 		route_keys.push((encrypted_payload_ss, blinded_hop_pubkey));
 	})?;
 
@@ -126,12 +126,12 @@ fn encrypt_payload<P: Writeable>(payload: P, encrypted_tlvs_ss: [u8; 32]) -> Vec
 /// route, they are encoded into [`BlindedHop::encrypted_payload`].
 pub(crate) struct ForwardTlvs {
 	/// The node id of the next hop in the onion message's path.
-	next_node_id: PublicKey,
+	pub(super) next_node_id: PublicKey,
 	/// Senders of onion messages have the option of specifying an overriding `blinding_point`
 	/// for forwarding nodes along the path. If this field is absent, forwarding nodes will
 	/// calculate the next hop's blinding point by multiplying the blinding point that they
 	/// received by a blinding factor.
-	next_blinding_override: Option<PublicKey>,
+	pub(super) next_blinding_override: Option<PublicKey>,
 }
 
 /// Similar to [`ForwardTlvs`], but these TLVs are for the final node.
@@ -139,7 +139,7 @@ pub(crate) struct ReceiveTlvs {
 	/// If `path_id` is `Some`, it is used to identify the blinded route that this onion message is
 	/// sending to. This is useful for receivers to check that said blinded route is being used in
 	/// the right context.
-	path_id: Option<[u8; 32]>,
+	pub(super) path_id: Option<[u8; 32]>,
 }
 
 impl Writeable for ForwardTlvs {

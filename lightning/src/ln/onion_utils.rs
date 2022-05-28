@@ -33,14 +33,14 @@ use io::{Cursor, Read};
 use core::convert::{AsMut, TryInto};
 use core::ops::Deref;
 
-pub(super) struct OnionKeys {
+pub(crate) struct OnionKeys {
 	#[cfg(test)]
-	pub(super) shared_secret: SharedSecret,
+	pub(crate) shared_secret: SharedSecret,
 	#[cfg(test)]
-	pub(super) blinding_factor: [u8; 32],
-	pub(super) ephemeral_pubkey: PublicKey,
-	pub(super) rho: [u8; 32],
-	pub(super) mu: [u8; 32],
+	pub(crate) blinding_factor: [u8; 32],
+	pub(crate) ephemeral_pubkey: PublicKey,
+	pub(crate) rho: [u8; 32],
+	pub(crate) mu: [u8; 32],
 }
 
 #[inline]
@@ -265,7 +265,7 @@ impl PacketData for FixedSizeOnionPacket {
 }
 
 /// panics if route_size_insane(payloads) and we're sending a payment
-fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData + AsMut<[u8]>>(
+pub(crate) fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData + AsMut<[u8]>>(
 	mut payloads: Vec<HD>, onion_keys: Vec<OnionKeys>, mut packet_data: D, associated_data: Option<&PaymentHash>) -> D::P
 {
 	let filler = {
