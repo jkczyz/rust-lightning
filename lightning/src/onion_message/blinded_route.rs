@@ -75,7 +75,7 @@ impl BlindedRoute {
 			};
 			blinded_hops.push(BlindedHop {
 				blinded_node_id,
-				encrypted_payload: encrypt_intermediate_payload(payload, encrypted_payload_key),
+				encrypted_payload: encrypt_payload(payload, encrypted_payload_key),
 			});
 		}
 
@@ -84,7 +84,7 @@ impl BlindedRoute {
 		let (encrypted_payload_key, blinded_node_id) = route_keys.next().unwrap();
 		blinded_hops.push(BlindedHop {
 			blinded_node_id,
-			encrypted_payload: encrypt_final_payload(payload, encrypted_payload_key),
+			encrypted_payload: encrypt_payload(payload, encrypted_payload_key),
 		});
 
 		Ok(BlindedRoute {
@@ -96,16 +96,8 @@ impl BlindedRoute {
 
 }
 
-/// Encrypt intermediate TLVs to be used as a [`BlindedHop::encrypted_payload`].
-fn encrypt_intermediate_payload(payload: ForwardTlvs, encrypted_tlvs_ss: [u8; 32]) -> Vec<u8> {
-	let mut writer = VecWriter(Vec::new());
-	let write_adapter = ChaChaPolyWriteAdapter::new(encrypted_tlvs_ss, &payload);
-	write_adapter.write(&mut writer).expect("In-memory writes cannot fail");
-	writer.0
-}
-
-/// Encrypt final TLVs to be used as a [`BlindedHop::encrypted_payload`].
-fn encrypt_final_payload(payload: ReceiveTlvs, encrypted_tlvs_ss: [u8; 32]) -> Vec<u8> {
+/// Encrypt TLV payload to be used as a [`BlindedHop::encrypted_payload`].
+fn encrypt_payload<P: Writeable>(payload: P, encrypted_tlvs_ss: [u8; 32]) -> Vec<u8> {
 	let mut writer = VecWriter(Vec::new());
 	let write_adapter = ChaChaPolyWriteAdapter::new(encrypted_tlvs_ss, &payload);
 	write_adapter.write(&mut writer).expect("In-memory writes cannot fail");
