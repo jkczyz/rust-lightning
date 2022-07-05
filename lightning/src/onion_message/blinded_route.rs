@@ -62,7 +62,7 @@ impl BlindedRoute {
 		if node_pks.len() < 2 { return Err(()) }
 		let blinding_secret_bytes = keys_manager.get_secure_random_bytes();
 		let blinding_secret = SecretKey::from_slice(&blinding_secret_bytes[..]).expect("RNG is busted");
-		let mut blinded_node_ids_and_payload_keys = utils::construct_blinded_route_keys(secp_ctx, &node_pks, &blinding_secret).map_err(|_| ())?;
+		let mut blinded_node_ids_and_payload_keys = construct_blinded_route_keys(secp_ctx, &node_pks, &blinding_secret).map_err(|_| ())?;
 		let mut route_keys = blinded_node_ids_and_payload_keys.drain(..);
 		let mut blinded_hops = Vec::with_capacity(node_pks.len());
 
@@ -94,6 +94,23 @@ impl BlindedRoute {
 		})
 	}
 
+}
+
+/// Construct keys for creating a blinded route along the given `unblinded_path`.
+///
+/// Returns: `Vec<(encrypted_payload_key, blinded_node_id)>`
+/// where the former is for encrypting [`BlindedHop::encrypted_payload`] and the latter for
+/// [`BlindedHop::blinded_node_id`].
+pub(super) fn construct_blinded_route_keys<T: secp256k1::Signing + secp256k1::Verification>(
+	secp_ctx: &Secp256k1<T>, unblinded_path: &Vec<PublicKey>, session_priv: &SecretKey
+) -> Result<Vec<([u8; 32], PublicKey)>, secp256k1::Error> {
+	let mut route_keys = Vec::with_capacity(unblinded_path.len());
+
+	utils::construct_keys_callback(secp_ctx, unblinded_path, session_priv, |blinded_hop_pubkey, _, _, _, encrypted_payload_ss| {
+		route_keys.push((encrypted_payload_ss, blinded_hop_pubkey));
+	})?;
+
+	Ok(route_keys)
 }
 
 /// Encrypt TLV payload to be used as a [`BlindedHop::encrypted_payload`].
