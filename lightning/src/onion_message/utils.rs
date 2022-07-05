@@ -78,19 +78,17 @@ fn construct_keys_callback<T: secp256k1::Signing + secp256k1::Verification,
 
 /// Construct keys for creating a blinded route along the given `unblinded_path`.
 ///
-/// Returns: `(encrypted_payload_keys, blinded_node_ids)`
-/// where the former are for encrypting [`super::BlindedHop::encrypted_payload`] and the latter for
+/// Returns: `Vec<(encrypted_payload_key, blinded_node_id)>`
+/// where the former is for encrypting [`super::BlindedHop::encrypted_payload`] and the latter for
 /// [`super::BlindedHop::blinded_node_id`].
 pub(super) fn construct_blinded_route_keys<T: secp256k1::Signing + secp256k1::Verification>(
 	secp_ctx: &Secp256k1<T>, unblinded_path: &Vec<PublicKey>, session_priv: &SecretKey
-) -> Result<(Vec<[u8; 32]>, Vec<PublicKey>), secp256k1::Error> {
-	let mut encrypted_payload_keys = Vec::with_capacity(unblinded_path.len());
-	let mut blinded_node_pks = Vec::with_capacity(unblinded_path.len());
+) -> Result<Vec<([u8; 32], PublicKey)>, secp256k1::Error> {
+	let mut route_keys = Vec::with_capacity(unblinded_path.len());
 
 	construct_keys_callback(secp_ctx, unblinded_path, session_priv, |blinded_hop_pubkey, _, _, _, encrypted_payload_ss| {
-		blinded_node_pks.push(blinded_hop_pubkey);
-		encrypted_payload_keys.push(encrypted_payload_ss);
+		route_keys.push((encrypted_payload_ss, blinded_hop_pubkey));
 	})?;
 
-	Ok((encrypted_payload_keys, blinded_node_pks))
+	Ok(route_keys)
 }

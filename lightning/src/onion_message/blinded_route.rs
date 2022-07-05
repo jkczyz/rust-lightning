@@ -62,30 +62,29 @@ impl BlindedRoute {
 		if node_pks.len() < 2 { return Err(()) }
 		let blinding_secret_bytes = keys_manager.get_secure_random_bytes();
 		let blinding_secret = SecretKey::from_slice(&blinding_secret_bytes[..]).expect("RNG is busted");
-		let (mut encrypted_payload_keys, mut blinded_node_pks) =
-			utils::construct_blinded_route_keys(secp_ctx, &node_pks, &blinding_secret).map_err(|_| ())?;
+		let mut blinded_node_ids_and_payload_keys = utils::construct_blinded_route_keys(secp_ctx, &node_pks, &blinding_secret).map_err(|_| ())?;
+		let mut route_keys = blinded_node_ids_and_payload_keys.drain(..);
 		let mut blinded_hops = Vec::with_capacity(node_pks.len());
-		debug_assert_eq!(encrypted_payload_keys.len(), blinded_node_pks.len());
-		let mut enc_tlvs_keys = encrypted_payload_keys.drain(..);
-		let mut blinded_pks = blinded_node_pks.drain(..);
 
 		let introduction_node_id = node_pks.remove(0);
 		for pk in node_pks.into_iter() {
+			let (encrypted_payload_key, blinded_node_id) = route_keys.next().unwrap();
 			let payload = ForwardTlvs {
 				next_node_id: pk.clone(),
 				next_blinding_override: None,
 			};
 			blinded_hops.push(BlindedHop {
-				blinded_node_id: blinded_pks.next().unwrap(),
-				encrypted_payload: encrypt_intermediate_payload(payload, enc_tlvs_keys.next().unwrap()),
+				blinded_node_id,
+				encrypted_payload: encrypt_intermediate_payload(payload, encrypted_payload_key),
 			});
 		}
 
 		// Add the recipient final payload.
 		let payload = ReceiveTlvs { path_id: None };
+		let (encrypted_payload_key, blinded_node_id) = route_keys.next().unwrap();
 		blinded_hops.push(BlindedHop {
-			blinded_node_id: blinded_pks.next().unwrap(),
-			encrypted_payload: encrypt_final_payload(payload, enc_tlvs_keys.next().unwrap()),
+			blinded_node_id,
+			encrypted_payload: encrypt_final_payload(payload, encrypted_payload_key),
 		});
 
 		Ok(BlindedRoute {
