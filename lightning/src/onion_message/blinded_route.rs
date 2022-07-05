@@ -56,7 +56,7 @@ impl BlindedRoute {
 	///
 	/// Errors if less than two hops are provided or if `node_pk`(s) are invalid.
 	pub fn new<Signer: Sign, K: Deref, T: secp256k1::Signing + secp256k1::Verification>
-		(node_pks: Vec<PublicKey>, keys_manager: &K, secp_ctx: &Secp256k1<T>) -> Result<Self, ()>
+		(mut node_pks: Vec<PublicKey>, keys_manager: &K, secp_ctx: &Secp256k1<T>) -> Result<Self, ()>
 		where K::Target: KeysInterface<Signer = Signer>,
 	{
 		if node_pks.len() < 2 { return Err(()) }
@@ -69,7 +69,8 @@ impl BlindedRoute {
 		let mut enc_tlvs_keys = encrypted_payload_keys.drain(..);
 		let mut blinded_pks = blinded_node_pks.drain(..);
 
-		for pk in node_pks.iter().skip(1) {
+		let introduction_node_id = node_pks.remove(0);
+		for pk in node_pks.into_iter() {
 			let payload = ForwardTlvs {
 				next_node_id: pk.clone(),
 				next_blinding_override: None,
@@ -88,7 +89,7 @@ impl BlindedRoute {
 		});
 
 		Ok(BlindedRoute {
-			introduction_node_id: node_pks[0].clone(),
+			introduction_node_id,
 			blinding_point: PublicKey::from_secret_key(secp_ctx, &blinding_secret),
 			blinded_hops,
 		})
