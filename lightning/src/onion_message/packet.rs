@@ -111,8 +111,8 @@ pub(super) enum Payload {
 }
 
 impl onion_utils::Payload for Payload {
-	fn read<R: Read, D: onion_utils::DecodeInput>(chacha_stream: &mut ChaChaReader<R>, ss: D) -> Result<Self, DecodeError> {
-		<Payload as ReadableArgs<SharedSecret>>::read(chacha_stream, ss.read_arg().unwrap())
+	fn read<R: Read>(chacha_stream: &mut ChaChaReader<R>, ss: Option<SharedSecret>) -> Result<Self, DecodeError> {
+		<Payload as ReadableArgs<SharedSecret>>::read(chacha_stream, ss.unwrap())
 	}
 }
 

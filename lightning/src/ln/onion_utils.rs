@@ -569,55 +569,45 @@ pub(super) fn process_onion_failure<T: secp256k1::Signing, L: Deref>(secp_ctx: &
 }
 
 /// An input used when decoding an onion packet.
-pub(crate) trait DecodeInput {
+pub(crate) enum DecodeInput {
 	/// Input used when calculating the hmac of the onion packet.
-	fn hmac_input(&self) -> Option<&[u8]>;
+	Hmac(PaymentHash),
 	/// An argument used when decrypting our hop payload.
-	fn read_arg(self) -> Option<SharedSecret>;
+	PayloadRead(SharedSecret),
 }
 
-impl DecodeInput for PaymentHash {
-	fn hmac_input(&self) -> Option<&[u8]> {
-		Some(&self.0[..])
-	}
+impl DecodeInput {
 	fn read_arg(self) -> Option<SharedSecret> {
-		None
-	}
-}
-
-impl DecodeInput for SharedSecret {
-	fn hmac_input(&self) -> Option<&[u8]> {
-		None
-	}
-	fn read_arg(self) -> Option<SharedSecret> {
-		Some(self)
+		match self {
+			DecodeInput::PayloadRead(ss) => Some(ss),
+			_ => None,
+		}
 	}
 }
 
 /// Used in the decoding of inbound payments' and onion messages' routing packets. This trait allows
-/// us to use `decode_next_hop` to return the payloads and next hop packet bytes of both payments
-/// and onion messages.
+/// us to use `decode_next_hop` to return the payloads of either payments or onion messages.
 pub(crate) trait Payload {
-	fn read<R: Read, D: DecodeInput>(chacha_stream: &mut ChaChaReader<R>, decode_input: D) ->
+	fn read<R: Read>(chacha_stream: &mut ChaChaReader<R>, read_arg: Option<SharedSecret>) ->
 		Result<Self, msgs::DecodeError> where Self: Sized;
 }
 
 impl Payload for msgs::OnionHopData {
-	fn read<R: Read, D: DecodeInput>(chacha_stream: &mut ChaChaReader<R>, _decode_input: D) -> Result<Self, msgs::DecodeError> {
+	fn read<R: Read>(chacha_stream: &mut ChaChaReader<R>, _read_arg: Option<SharedSecret>) -> Result<Self, msgs::DecodeError> {
 		<msgs::OnionHopData as Readable>::read(chacha_stream)
 	}
 }
 
-/// Similar to `Payload` above, this allows `decode_next_hop` to work for both payment and onion
-/// message forwards.
+/// Similar to `Payload` above, this allows `decode_next_hop` to return the next hop packet bytes
+/// for either payments or onion message forwards.
 pub(crate) trait NextPacketBytes {
 	fn read<R: Read>(chacha_stream: &mut ChaChaReader<R>, read_len: usize) -> (Self, usize) where Self: Sized;
 	fn process_in_place<R: Read>(&mut self, chacha_stream: &mut ChaChaReader<R>, read_pos: usize);
 }
 
-impl NextPacketBytes for [u8; 1300] {
+impl NextPacketBytes for [u8; ONION_DATA_LEN] {
 	fn read<R: Read>(chacha_stream: &mut ChaChaReader<R>, _read_len: usize) -> (Self, usize) {
-		let mut new_packet_bytes = [0 as u8; 20*65];
+		let mut new_packet_bytes = [0 as u8; ONION_DATA_LEN];
 		let read_pos = chacha_stream.read(&mut new_packet_bytes).unwrap();
 		(new_packet_bytes, read_pos)
 	}
@@ -649,7 +639,7 @@ pub(crate) enum Hop {
 		/// HMAC of the next hop's onion packet.
 		next_hop_hmac: [u8; 32],
 		/// Bytes of the onion packet we're forwarding.
-		new_packet_bytes: [u8; 20*65],
+		new_packet_bytes: [u8; ONION_DATA_LEN],
 	},
 }
 
@@ -669,7 +659,7 @@ pub(crate) enum OnionDecodeErr {
 }
 
 pub(crate) fn decode_next_payment_hop(shared_secret: [u8; 32], hop_data: &[u8], hmac_bytes: [u8; 32], payment_hash: PaymentHash) -> Result<Hop, OnionDecodeErr> {
-	match decode_next_hop(shared_secret, hop_data, hmac_bytes, payment_hash) {
+	match decode_next_hop(shared_secret, hop_data, hmac_bytes, DecodeInput::Hmac(payment_hash)) {
 		Ok((next_hop_data, None)) => Ok(Hop::Receive(next_hop_data)),
 		Ok((next_hop_data, Some((next_hop_hmac, new_packet_bytes)))) => {
 			Ok(Hop::Forward {
@@ -682,12 +672,12 @@ pub(crate) fn decode_next_payment_hop(shared_secret: [u8; 32], hop_data: &[u8], 
 	}
 }
 
-pub(crate) fn decode_next_hop<D: DecodeInput, P: Payload, N: NextPacketBytes>(shared_secret: [u8; 32], hop_data: &[u8], hmac_bytes: [u8; 32], decode_input: D) -> Result<(P, Option<([u8; 32], N)>), OnionDecodeErr> {
+pub(crate) fn decode_next_hop<P: Payload, N: NextPacketBytes>(shared_secret: [u8; 32], hop_data: &[u8], hmac_bytes: [u8; 32], decode_input: DecodeInput) -> Result<(P, Option<([u8; 32], N)>), OnionDecodeErr> {
 	let (rho, mu) = gen_rho_mu_from_shared_secret(&shared_secret);
 	let mut hmac = HmacEngine::<Sha256>::new(&mu);
 	hmac.input(hop_data);
-	if let Some(hmac_input) = decode_input.hmac_input() {
-		hmac.input(hmac_input);
+	if let DecodeInput::Hmac(payment_hash) = decode_input {
+		hmac.input(&payment_hash.0[..]);
 	}
 	if !fixed_time_eq(&Hmac::from_engine(hmac).into_inner(), &hmac_bytes) {
 		return Err(OnionDecodeErr::Malformed {
@@ -698,7 +688,7 @@ pub(crate) fn decode_next_hop<D: DecodeInput, P: Payload, N: NextPacketBytes>(sh
 
 	let mut chacha = ChaCha20::new(&rho, &[0u8; 8]);
 	let mut chacha_stream = ChaChaReader { chacha: &mut chacha, read: Cursor::new(&hop_data[..]) };
-	match Payload::read(&mut chacha_stream, decode_input) {
+	match Payload::read(&mut chacha_stream, decode_input.read_arg()) {
 		Err(err) => {
 			let error_code = match err {
 				msgs::DecodeError::UnknownVersion => 0x4000 | 1, // unknown realm byte

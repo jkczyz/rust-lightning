@@ -139,7 +139,8 @@ impl<Signer: Sign, K: Deref, L: Deref> OnionMessenger<Signer, K, L>
 			SharedSecret::new(&msg.onion_routing_packet.public_key, &blinded_priv).secret_bytes()
 		};
 		match onion_utils::decode_next_hop(onion_decode_shared_secret,
-			&msg.onion_routing_packet.hop_data[..], msg.onion_routing_packet.hmac, control_tlvs_ss)
+			&msg.onion_routing_packet.hop_data[..], msg.onion_routing_packet.hmac,
+			onion_utils::DecodeInput::PayloadRead(control_tlvs_ss))
 		{
 			Ok((Payload::Receive {
 				control_tlvs: ReceiveControlTlvs::Unblinded(ReceiveTlvs { path_id })
