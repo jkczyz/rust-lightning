@@ -31,6 +31,7 @@ use bitcoin::blockdata::script::Script;
 use bitcoin::hash_types::{Txid, BlockHash};
 
 use ln::features::{ChannelFeatures, ChannelTypeFeatures, InitFeatures, NodeFeatures};
+use ln::onion_utils;
 
 use prelude::*;
 use core::fmt;
@@ -991,6 +992,19 @@ pub(crate) struct OnionPacket {
 	pub(crate) public_key: Result<PublicKey, secp256k1::Error>,
 	pub(crate) hop_data: [u8; 20*65],
 	pub(crate) hmac: [u8; 32],
+}
+
+impl onion_utils::Packet for OnionPacket {
+	fn create(pubkey: PublicKey, hop_data: onion_utils::PacketData, hmac: [u8; 32]) -> Self {
+		Self {
+			version: 0,
+			public_key: Ok(pubkey),
+			hop_data: if let onion_utils::PacketData::Payment(data) = hop_data {
+				data
+			} else { panic!() },
+			hmac,
+		}
+	}
 }
 
 impl PartialEq for OnionPacket {

@@ -12,6 +12,7 @@
 use bitcoin::secp256k1::PublicKey;
 
 use ln::msgs::DecodeError;
+use ln::onion_utils;
 use util::ser::{LengthRead, LengthReadable, Readable, Writeable, Writer};
 
 use io;
@@ -19,14 +20,27 @@ use prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Packet {
-	pub(crate) version: u8,
-	pub(crate) public_key: PublicKey,
+	version: u8,
+	public_key: PublicKey,
 	// Unlike the onion packets used for payments, onion message packets can have payloads greater
 	// than 1300 bytes.
 	// TODO: if 1300 ends up being the most common size, optimize this to be:
 	// enum { ThirteenHundred([u8; 1300]), VarLen(Vec<u8>) }
-	pub(crate) hop_data: Vec<u8>,
-	pub(crate) hmac: [u8; 32],
+	hop_data: Vec<u8>,
+	hmac: [u8; 32],
+}
+
+impl onion_utils::Packet for Packet {
+	fn create(public_key: PublicKey, hop_data: onion_utils::PacketData, hmac: [u8; 32]) -> Self {
+		Self {
+			version: 0,
+			public_key,
+			hop_data: if let onion_utils::PacketData::Message(data) = hop_data {
+				data
+			} else { panic!() },
+			hmac,
+		}
+	}
 }
 
 impl Writeable for Packet {
