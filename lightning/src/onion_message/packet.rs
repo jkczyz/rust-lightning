@@ -22,8 +22,8 @@ use prelude::*;
 
 // Per the spec, an onion message packet's `hop_data` field length should be
 // SMALL_PACKET_HOP_DATA_LEN if it fits, else BIG_PACKET_HOP_DATA_LEN if it fits.
-pub(crate) const SMALL_PACKET_HOP_DATA_LEN: usize = 1300;
-pub(crate) const BIG_PACKET_HOP_DATA_LEN: usize = 32768;
+pub(super) const SMALL_PACKET_HOP_DATA_LEN: usize = 1300;
+pub(super) const BIG_PACKET_HOP_DATA_LEN: usize = 32768;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Packet {
