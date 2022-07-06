@@ -19,7 +19,7 @@ use io;
 use prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Packet {
+struct Packet {
 	version: u8,
 	public_key: PublicKey,
 	// Unlike the onion packets used for payments, onion message packets can have payloads greater
@@ -31,13 +31,12 @@ pub(crate) struct Packet {
 }
 
 impl onion_utils::Packet for Packet {
-	fn create(public_key: PublicKey, hop_data: onion_utils::PacketData, hmac: [u8; 32]) -> Self {
+	type D = Vec<u8>;
+	fn create(public_key: PublicKey, hop_data: Vec<u8>, hmac: [u8; 32]) -> Self {
 		Self {
 			version: 0,
 			public_key,
-			hop_data: if let onion_utils::PacketData::Message(data) = hop_data {
-				data
-			} else { panic!() },
+			hop_data,
 			hmac,
 		}
 	}

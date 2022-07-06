@@ -995,13 +995,12 @@ pub(crate) struct OnionPacket {
 }
 
 impl onion_utils::Packet for OnionPacket {
-	fn create(pubkey: PublicKey, hop_data: onion_utils::PacketData, hmac: [u8; 32]) -> Self {
+	type D = [u8; 1300];
+	fn create(pubkey: PublicKey, hop_data: [u8; 1300], hmac: [u8; 32]) -> Self {
 		Self {
 			version: 0,
 			public_key: Ok(pubkey),
-			hop_data: if let onion_utils::PacketData::Payment(data) = hop_data {
-				data
-			} else { panic!() },
+			hop_data,
 			hmac,
 		}
 	}
