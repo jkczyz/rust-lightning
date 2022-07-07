@@ -9,17 +9,21 @@
 
 //! Structs and enums useful for constructing and reading an onion message packet.
 
+use bitcoin::hashes::HashEngine;
+use bitcoin::hashes::hmac::HmacEngine;
+use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::secp256k1::PublicKey;
 
 use ln::msgs::DecodeError;
 use ln::onion_utils;
+use util::chacha20::ChaCha20;
 use util::ser::{LengthRead, LengthReadable, Readable, Writeable, Writer};
 
 use io;
 use prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]
-struct Packet {
+pub(crate) struct Packet {
 	version: u8,
 	public_key: PublicKey,
 	// Unlike the onion packets used for payments, onion message packets can have payloads greater
@@ -30,18 +34,40 @@ struct Packet {
 	hmac: [u8; 32],
 }
 
-impl onion_utils::Packet for Packet {
-	type D = Vec<u8>;
-	fn create(public_key: PublicKey, hop_data: Vec<u8>, hmac: [u8; 32]) -> Self {
-		Self {
+impl onion_utils::PacketData for Vec<u8> {
+	type P = Packet;
+	fn len(&self) -> usize { self.len() }
+	fn shift_right(&mut self, shift_amt: usize) {
+		shift_vec_right(self, shift_amt);
+	}
+	fn copy_from_slice(&mut self, start_idx: usize, end_idx: usize, slice: &[u8]) {
+		self[start_idx..end_idx].copy_from_slice(slice);
+	}
+	fn process_in_place(&mut self, chacha: &mut ChaCha20) {
+		chacha.process_in_place(self);
+	}
+	fn input_to_hmac(&self, hmac: &mut HmacEngine<Sha256>) {
+		hmac.input(self);
+	}
+	fn into_packet(self, public_key: PublicKey, hmac: [u8; 32]) -> Packet {
+		Self::P {
 			version: 0,
 			public_key,
-			hop_data,
+			hop_data: self,
 			hmac,
 		}
 	}
 }
 
+#[inline]
+fn shift_vec_right(vec: &mut Vec<u8>, amt: usize) {
+	for i in (amt..vec.len()).rev() {
+		vec[i] = vec[i-amt];
+	}
+	for i in 0..amt {
+		vec[i] = 0;
+	}
+}
 impl Writeable for Packet {
 	fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
 		self.version.write(w)?;
