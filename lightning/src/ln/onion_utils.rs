@@ -30,7 +30,7 @@ use bitcoin::secp256k1;
 
 use prelude::*;
 use io::{Cursor, Read};
-use core::convert::TryInto;
+use core::convert::{AsMut, TryInto};
 use core::ops::Deref;
 
 pub(super) struct OnionKeys {
@@ -240,28 +240,14 @@ pub(super) fn construct_onion_packet_bogus_hopdata<HD: Writeable>(payloads: Vec<
 /// type.
 pub(crate) trait PacketData {
 	type P;
-	fn len(&self) -> usize;
 	fn shift_right(&mut self, shift_amt: usize);
-	fn copy_from_slice(&mut self, start_idx: usize, end_idx: usize, slice: &[u8]);
-	fn process_in_place(&mut self, chacha_stream: &mut ChaCha20);
-	fn input_to_hmac(&self, hmac: &mut HmacEngine<Sha256>);
 	fn into_packet(self, pubkey: PublicKey, hmac: [u8; 32]) -> Self::P;
 }
 
 impl PacketData for [u8; ONION_DATA_LEN] {
 	type P = msgs::OnionPacket;
-	fn len(&self) -> usize { ONION_DATA_LEN }
 	fn shift_right(&mut self, shift_amt: usize) {
 		shift_arr_right(self, shift_amt);
-	}
-	fn copy_from_slice(&mut self, start_idx: usize, end_idx: usize, slice: &[u8]) {
-		self[start_idx..end_idx].copy_from_slice(slice);
-	}
-	fn process_in_place(&mut self, chacha: &mut ChaCha20) {
-		chacha.process_in_place(self);
-	}
-	fn input_to_hmac(&self, hmac: &mut HmacEngine<Sha256>) {
-		hmac.input(self);
 	}
 	fn into_packet(self, pubkey: PublicKey, hmac: [u8; 32]) -> msgs::OnionPacket {
 		Self::P {
@@ -274,8 +260,10 @@ impl PacketData for [u8; ONION_DATA_LEN] {
 }
 
 /// panics if route_size_insane(payloads) and we're sending a payment
-fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData>(mut payloads: Vec<HD>, onion_keys: Vec<OnionKeys>, mut packet_data: D, associated_data: Option<&PaymentHash>) -> D::P {
-	let packet_data_len = packet_data.len();
+fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData + AsMut<[u8]>>(
+	mut payloads: Vec<HD>, onion_keys: Vec<OnionKeys>, mut packet_data: D, associated_data: Option<&PaymentHash>) -> D::P
+{
+	let packet_data_len = packet_data.as_mut().len();
 	let filler = {
 		const ONION_HOP_DATA_LEN: usize = 65; // We may decrease this eventually after TLV is common
 		let mut res = Vec::with_capacity(ONION_HOP_DATA_LEN * (payloads.len() - 1));
@@ -306,18 +294,18 @@ fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData>(mut payl
 		let mut payload_len = LengthCalculatingWriter(0);
 		payload.write(&mut payload_len).expect("Failed to calculate length");
 		packet_data.shift_right(payload_len.0 + 32);
-		packet_data.copy_from_slice(0, payload_len.0, &payload.encode()[..]);
-		packet_data.copy_from_slice(payload_len.0, payload_len.0 + 32, &hmac_res);
+		packet_data.as_mut()[0..payload_len.0].copy_from_slice(&payload.encode()[..]);
+		packet_data.as_mut()[payload_len.0..(payload_len.0 + 32)].copy_from_slice(&hmac_res);
 
 		let mut chacha = ChaCha20::new(&keys.rho, &[0u8; 8]);
-		packet_data.process_in_place(&mut chacha);
+		chacha.process_in_place(&mut packet_data.as_mut());
 
 		if i == 0 {
-			packet_data.copy_from_slice(ONION_DATA_LEN - filler.len(), ONION_DATA_LEN, &filler[..]);
+			packet_data.as_mut()[ONION_DATA_LEN - filler.len()..ONION_DATA_LEN].copy_from_slice(&filler[..]);
 		}
 
 		let mut hmac = HmacEngine::<Sha256>::new(&keys.mu);
-		packet_data.input_to_hmac(&mut hmac);
+		hmac.input(&packet_data.as_mut());
 		if let Some(associated_data) = associated_data {
 			hmac.input(&associated_data.0[..]);
 		}
