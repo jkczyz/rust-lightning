@@ -187,7 +187,7 @@ pub(super) fn build_onion_payloads(path: &Vec<RouteHop>, total_msat: u64, paymen
 pub(crate) const ONION_DATA_LEN: usize = 20*65;
 
 #[inline]
-fn shift_arr_right(arr: &mut [u8; ONION_DATA_LEN], amt: usize) {
+fn shift_slice_right(arr: &mut [u8], amt: usize) {
 	for i in (amt..ONION_DATA_LEN).rev() {
 		arr[i] = arr[i-amt];
 	}
@@ -240,7 +240,6 @@ pub(super) fn construct_onion_packet_bogus_hopdata<HD: Writeable>(payloads: Vec<
 /// type.
 pub(crate) trait PacketData {
 	type P;
-	fn shift_right(&mut self, shift_amt: usize);
 	fn into_packet(self, pubkey: PublicKey, hmac: [u8; 32]) -> Self::P;
 }
 
@@ -255,9 +254,6 @@ impl AsMut<[u8]> for FixedSizeOnionPacket {
 
 impl PacketData for FixedSizeOnionPacket {
 	type P = msgs::OnionPacket;
-	fn shift_right(&mut self, shift_amt: usize) {
-		shift_arr_right(self, shift_amt);
-	}
 	fn into_packet(self, pubkey: PublicKey, hmac: [u8; 32]) -> msgs::OnionPacket {
 		Self::P {
 			version: 0,
@@ -272,8 +268,8 @@ impl PacketData for FixedSizeOnionPacket {
 fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData + AsMut<[u8]>>(
 	mut payloads: Vec<HD>, onion_keys: Vec<OnionKeys>, mut packet_data: D, associated_data: Option<&PaymentHash>) -> D::P
 {
-	let packet_data_len = packet_data.as_mut().len();
 	let filler = {
+		let packet_data = packet_data.as_mut();
 		const ONION_HOP_DATA_LEN: usize = 65; // We may decrease this eventually after TLV is common
 		let mut res = Vec::with_capacity(ONION_HOP_DATA_LEN * (payloads.len() - 1));
 
@@ -282,7 +278,7 @@ fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData + AsMut<[
 			if i == payloads.len() - 1 { break; }
 
 			let mut chacha = ChaCha20::new(&keys.rho, &[0u8; 8]);
-			for _ in 0..(packet_data_len - pos) { // TODO: Batch this.
+			for _ in 0..(packet_data.len() - pos) { // TODO: Batch this.
 				let mut dummy = [0; 1];
 				chacha.process_in_place(&mut dummy); // We don't have a seek function :(
 			}
@@ -290,7 +286,7 @@ fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData + AsMut<[
 			let mut payload_len = LengthCalculatingWriter(0);
 			payload.write(&mut payload_len).expect("Failed to calculate length");
 			pos += payload_len.0 + 32;
-			assert!(pos <= packet_data_len);
+			assert!(pos <= packet_data.len());
 
 			res.resize(pos, 0u8);
 			chacha.process_in_place(&mut res);
@@ -302,19 +298,21 @@ fn construct_onion_packet_with_init_noise<HD: Writeable, D: PacketData + AsMut<[
 	for (i, (payload, keys)) in payloads.iter_mut().zip(onion_keys.iter()).rev().enumerate() {
 		let mut payload_len = LengthCalculatingWriter(0);
 		payload.write(&mut payload_len).expect("Failed to calculate length");
-		packet_data.shift_right(payload_len.0 + 32);
-		packet_data.as_mut()[0..payload_len.0].copy_from_slice(&payload.encode()[..]);
-		packet_data.as_mut()[payload_len.0..(payload_len.0 + 32)].copy_from_slice(&hmac_res);
+
+		let packet_data = packet_data.as_mut();
+		shift_slice_right(packet_data, payload_len.0 + 32);
+		packet_data[0..payload_len.0].copy_from_slice(&payload.encode()[..]);
+		packet_data[payload_len.0..(payload_len.0 + 32)].copy_from_slice(&hmac_res);
 
 		let mut chacha = ChaCha20::new(&keys.rho, &[0u8; 8]);
-		chacha.process_in_place(&mut packet_data.as_mut());
+		chacha.process_in_place(packet_data);
 
 		if i == 0 {
-			packet_data.as_mut()[ONION_DATA_LEN - filler.len()..ONION_DATA_LEN].copy_from_slice(&filler[..]);
+			packet_data[ONION_DATA_LEN - filler.len()..ONION_DATA_LEN].copy_from_slice(&filler[..]);
 		}
 
 		let mut hmac = HmacEngine::<Sha256>::new(&keys.mu);
-		hmac.input(&packet_data.as_mut());
+		hmac.input(packet_data);
 		if let Some(associated_data) = associated_data {
 			hmac.input(&associated_data.0[..]);
 		}

@@ -32,9 +32,6 @@ pub(crate) struct Packet {
 
 impl onion_utils::PacketData for Vec<u8> {
 	type P = Packet;
-	fn shift_right(&mut self, shift_amt: usize) {
-		shift_vec_right(self, shift_amt);
-	}
 	fn into_packet(self, public_key: PublicKey, hmac: [u8; 32]) -> Packet {
 		Self::P {
 			version: 0,
@@ -45,15 +42,6 @@ impl onion_utils::PacketData for Vec<u8> {
 	}
 }
 
-#[inline]
-fn shift_vec_right(vec: &mut Vec<u8>, amt: usize) {
-	for i in (amt..vec.len()).rev() {
-		vec[i] = vec[i-amt];
-	}
-	for i in 0..amt {
-		vec[i] = 0;
-	}
-}
 impl Writeable for Packet {
 	fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
 		self.version.write(w)?;
