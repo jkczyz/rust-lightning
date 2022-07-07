@@ -66,8 +66,9 @@ impl BlindedRoute {
 		let mut route_keys = blinded_node_ids_and_payload_keys.drain(..);
 		let mut blinded_hops = Vec::with_capacity(node_pks.len());
 
-		let introduction_node_id = node_pks.remove(0);
-		for pk in node_pks.into_iter() {
+		let mut iter = node_pks.drain(..);
+		let introduction_node_id = iter.next().unwrap();
+		for pk in iter {
 			let (encrypted_payload_key, blinded_node_id) = route_keys.next().unwrap();
 			let payload = ForwardTlvs {
 				next_node_id: pk.clone(),
@@ -101,7 +102,7 @@ impl BlindedRoute {
 /// Returns: `Vec<(encrypted_payload_key, blinded_node_id)>`
 /// where the former is for encrypting [`BlindedHop::encrypted_payload`] and the latter for
 /// [`BlindedHop::blinded_node_id`].
-pub(super) fn construct_blinded_route_keys<T: secp256k1::Signing + secp256k1::Verification>(
+fn construct_blinded_route_keys<T: secp256k1::Signing + secp256k1::Verification>(
 	secp_ctx: &Secp256k1<T>, unblinded_path: &Vec<PublicKey>, session_priv: &SecretKey
 ) -> Result<Vec<([u8; 32], PublicKey)>, secp256k1::Error> {
 	let mut route_keys = Vec::with_capacity(unblinded_path.len());
