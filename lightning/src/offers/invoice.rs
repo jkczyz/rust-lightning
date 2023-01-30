@@ -106,9 +106,10 @@ use core::time::Duration;
 use crate::io;
 use crate::ln::PaymentHash;
 use crate::ln::features::{BlindedHopFeatures, Bolt12InvoiceFeatures};
+use crate::ln::inbound_payment::ExpandedKey;
 use crate::ln::msgs::DecodeError;
 use crate::offers::invoice_request::{InvoiceRequest, InvoiceRequestContents, InvoiceRequestTlvStream, InvoiceRequestTlvStreamRef};
-use crate::offers::merkle::{SignError, SignatureTlvStream, SignatureTlvStreamRef, WithoutSignatures, self};
+use crate::offers::merkle::{SignError, SignatureTlvStream, SignatureTlvStreamRef, TlvStream, WithoutSignatures, self};
 use crate::offers::offer::{Amount, OfferTlvStream, OfferTlvStreamRef};
 use crate::offers::parse::{ParseError, ParsedMessage, SemanticError};
 use crate::offers::payer::{PayerTlvStream, PayerTlvStreamRef};
@@ -123,7 +124,7 @@ use std::time::SystemTime;
 
 const DEFAULT_RELATIVE_EXPIRY: Duration = Duration::from_secs(7200);
 
-const SIGNATURE_TAG: &'static str = concat!("lightning", "invoice", "signature");
+pub(super) const SIGNATURE_TAG: &'static str = concat!("lightning", "invoice", "signature");
 
 /// Builds an [`Invoice`] from either:
 /// - an [`InvoiceRequest`] for the "offer to be paid" flow or
@@ -469,8 +470,14 @@ impl Invoice {
 		self.signature
 	}
 
+	/// Verifies that the invoice was for a request or refund created using the given key.
+	#[allow(unused)]
+	pub(crate) fn verify(&self, key: &ExpandedKey) -> bool {
+		self.contents.verify(TlvStream::new(&self.bytes), key)
+	}
+
 	#[cfg(test)]
-	fn as_tlv_stream(&self) -> FullInvoiceTlvStreamRef {
+	pub(super) fn as_tlv_stream(&self) -> FullInvoiceTlvStreamRef {
 		let (payer_tlv_stream, offer_tlv_stream, invoice_request_tlv_stream, invoice_tlv_stream) =
 			self.contents.as_tlv_stream();
 		let signature_tlv_stream = SignatureTlvStreamRef {
@@ -510,6 +517,15 @@ impl InvoiceContents {
 		match self {
 			InvoiceContents::ForOffer { fields, .. } => fields,
 			InvoiceContents::ForRefund { fields, .. } => fields,
+		}
+	}
+
+	fn verify(&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey) -> bool {
+		match self {
+			InvoiceContents::ForOffer { invoice_request, .. } => {
+				invoice_request.verify(tlv_stream, key)
+			},
+			_ => todo!(),
 		}
 	}
 

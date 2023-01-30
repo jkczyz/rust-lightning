@@ -13,8 +13,7 @@ use alloc::string::ToString;
 use bitcoin::hashes::{Hash, HashEngine};
 use bitcoin::hashes::cmp::fixed_time_eq;
 use bitcoin::hashes::hmac::{Hmac, HmacEngine};
-use bitcoin::hashes::sha256::{Hash as Sha256, self};
-use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+use bitcoin::hashes::sha256::{Hash as Sha256};
 use crate::chain::keysinterface::{KeyMaterial, EntropySource};
 use crate::ln::{PaymentHash, PaymentPreimage, PaymentSecret};
 use crate::ln::msgs;
@@ -78,20 +77,6 @@ impl ExpandedKey {
 		let mut hmac = HmacEngine::<Sha256>::new(&self.offers_base_key);
 		hmac.input(&nonce.0);
 		hmac
-	}
-
-	/// Derives a pubkey using the given nonce for use as [`Offer::signing_pubkey`].
-	///
-	/// [`Offer::signing_pubkey`]: crate::offers::offer::Offer::signing_pubkey
-	#[allow(unused)]
-	pub(crate) fn signing_pubkey_for_offer(&self, nonce: Nonce) -> PublicKey {
-		let mut engine = sha256::Hash::engine();
-		engine.input(&self.offers_base_key);
-		engine.input(&nonce.0);
-
-		let hash = sha256::Hash::from_engine(engine);
-		let secp_ctx = Secp256k1::new();
-		SecretKey::from_slice(&hash).unwrap().public_key(&secp_ctx)
 	}
 
 	pub(crate) fn encrypt_nonce_for_offer(&self, nonce: Nonce) -> EncryptedNonce {

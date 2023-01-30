@@ -259,11 +259,11 @@ impl OfferBuilder {
 		}
 
 		if let Some(metadata) = metadata {
-			let (metadata_bytes, signing_pubkey) = metadata.into_parts();
+			let (metadata_bytes, keys) = metadata.into_parts();
 			self.offer.metadata = Some(Metadata::Bytes(metadata_bytes));
 
-			if let Some(signing_pubkey) = signing_pubkey {
-				self.offer.signing_pubkey = signing_pubkey;
+			if let Some(keys) = keys {
+				self.offer.signing_pubkey = keys.public_key();
 			}
 		}
 
@@ -687,7 +687,7 @@ impl Quantity {
 }
 
 /// Valid type range for offer TLV records.
-const OFFER_TYPES: core::ops::Range<u64> = 1..80;
+pub(super) const OFFER_TYPES: core::ops::Range<u64> = 1..80;
 
 /// TLV record type for [`Offer::metadata`].
 const OFFER_METADATA_TYPE: u64 = 4;

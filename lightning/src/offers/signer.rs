@@ -14,7 +14,7 @@ use bitcoin::hashes::hmac::{Hmac, HmacEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use core::convert::TryFrom;
 use core::fmt;
-use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey, self};
+use bitcoin::secp256k1::{KeyPair, PublicKey, Secp256k1, SecretKey, self};
 use crate::io;
 use crate::ln::inbound_payment::{EncryptedNonce, ExpandedKey, Nonce};
 use crate::offers::merkle::TlvRecord;
@@ -60,13 +60,13 @@ impl Metadata {
 		}
 	}
 
-	pub fn into_parts(self) -> (Vec<u8>, Option<PublicKey>) {
+	pub fn into_parts(self) -> (Vec<u8>, Option<KeyPair>) {
 		match self {
 			Metadata::Bytes(bytes) => (bytes, None),
 			Metadata::Derived(metadata_material) => (metadata_material.into_metadata(), None),
 			Metadata::DerivedSigningPubkey(metadata_material) => {
-				let (metadata, pubkey) = metadata_material.into_parts();
-				(metadata, Some(pubkey))
+				let (metadata, keys) = metadata_material.into_parts();
+				(metadata, Some(keys))
 			},
 		}
 	}
@@ -119,11 +119,12 @@ impl MetadataMaterial {
 		bytes
 	}
 
-	fn into_parts(self) -> (Vec<u8>, PublicKey) {
+	fn into_parts(self) -> (Vec<u8>, KeyPair) {
 		let secp_ctx = Secp256k1::new();
 		let hmac = Hmac::from_engine(self.hmac);
-		let pubkey = SecretKey::from_slice(hmac.as_inner()).unwrap().public_key(&secp_ctx);
-		(self.nonce.as_slice().to_vec(), pubkey)
+		let privkey = SecretKey::from_slice(hmac.as_inner()).unwrap();
+		let keys = KeyPair::from_secret_key(&secp_ctx, &privkey);
+		(self.nonce.as_slice().to_vec(), keys)
 	}
 }
 
