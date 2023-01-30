@@ -60,13 +60,14 @@ use core::convert::TryFrom;
 use crate::io;
 use crate::ln::PaymentHash;
 use crate::ln::features::InvoiceRequestFeatures;
-use crate::ln::inbound_payment::ExpandedKey;
+use crate::ln::inbound_payment::{ExpandedKey, Nonce};
 use crate::ln::msgs::DecodeError;
 use crate::offers::invoice::{BlindedPayInfo, InvoiceBuilder};
 use crate::offers::merkle::{SignError, SignatureTlvStream, SignatureTlvStreamRef, TlvStream, self};
 use crate::offers::offer::{Offer, OfferContents, OfferTlvStream, OfferTlvStreamRef};
 use crate::offers::parse::{ParseError, ParsedMessage, SemanticError};
 use crate::offers::payer::{PayerContents, PayerTlvStream, PayerTlvStreamRef};
+use crate::offers::signer::{Metadata, MetadataMaterial};
 use crate::onion_message::BlindedPath;
 use crate::util::ser::{HighZeroBytesDroppedBigSize, SeekReadable, WithoutLength, Writeable, Writer};
 use crate::util::string::PrintableString;
@@ -82,21 +83,54 @@ const SIGNATURE_TAG: &'static str = concat!("lightning", "invoice_request", "sig
 /// [module-level documentation]: self
 pub struct InvoiceRequestBuilder<'a> {
 	offer: &'a Offer,
-	invoice_request: InvoiceRequestContents,
+	invoice_request: InvoiceRequestContentsWithoutPayerId,
+	metadata: Metadata,
+	payer_id: Option<PublicKey>,
 }
 
 impl<'a> InvoiceRequestBuilder<'a> {
 	pub(super) fn new(offer: &'a Offer, metadata: Vec<u8>, payer_id: PublicKey) -> Self {
 		Self {
 			offer,
-			invoice_request: InvoiceRequestContents {
-				inner: InvoiceRequestContentsWithoutPayerId {
-					payer: PayerContents(metadata), offer: offer.contents.clone(), chain: None,
-					amount_msats: None, features: InvoiceRequestFeatures::empty(), quantity: None,
-					payer_note: None,
-				},
-				payer_id,
+			invoice_request: InvoiceRequestContentsWithoutPayerId {
+				payer: PayerContents(metadata), offer: offer.contents.clone(), chain: None,
+				amount_msats: None, features: InvoiceRequestFeatures::empty(), quantity: None,
+				payer_note: None,
 			},
+			metadata: Metadata::Empty,
+			payer_id: Some(payer_id),
+		}
+	}
+
+	#[allow(unused)]
+	pub(super) fn deriving_payer_id(
+		offer: &'a Offer, expanded_key: &ExpandedKey, nonce: Nonce
+	) -> Self {
+		Self {
+			offer,
+			invoice_request: InvoiceRequestContentsWithoutPayerId {
+				payer: PayerContents(vec![]), offer: offer.contents.clone(), chain: None,
+				amount_msats: None, features: InvoiceRequestFeatures::empty(), quantity: None,
+				payer_note: None,
+			},
+			metadata: Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key)),
+			payer_id: None,
+		}
+	}
+
+	#[allow(unused)]
+	pub(super) fn deriving_metadata(
+		offer: &'a Offer, node_id: PublicKey, expanded_key: &ExpandedKey, nonce: Nonce
+	) -> Self {
+		Self {
+			offer,
+			invoice_request: InvoiceRequestContentsWithoutPayerId {
+				payer: PayerContents(vec![]), offer: offer.contents.clone(), chain: None,
+				amount_msats: None, features: InvoiceRequestFeatures::empty(), quantity: None,
+				payer_note: None,
+			},
+			metadata: Metadata::Derived(MetadataMaterial::new(nonce, expanded_key)),
+			payer_id: Some(node_id),
 		}
 	}
 
@@ -111,7 +145,7 @@ impl<'a> InvoiceRequestBuilder<'a> {
 			return Err(SemanticError::UnsupportedChain);
 		}
 
-		self.invoice_request.inner.chain = Some(chain);
+		self.invoice_request.chain = Some(chain);
 		Ok(self)
 	}
 
@@ -122,10 +156,10 @@ impl<'a> InvoiceRequestBuilder<'a> {
 	///
 	/// [`quantity`]: Self::quantity
 	pub fn amount_msats(mut self, amount_msats: u64) -> Result<Self, SemanticError> {
-		self.invoice_request.inner.offer.check_amount_msats_for_quantity(
-			Some(amount_msats), self.invoice_request.inner.quantity
+		self.invoice_request.offer.check_amount_msats_for_quantity(
+			Some(amount_msats), self.invoice_request.quantity
 		)?;
-		self.invoice_request.inner.amount_msats = Some(amount_msats);
+		self.invoice_request.amount_msats = Some(amount_msats);
 		Ok(self)
 	}
 
@@ -134,8 +168,8 @@ impl<'a> InvoiceRequestBuilder<'a> {
 	///
 	/// Successive calls to this method will override the previous setting.
 	pub fn quantity(mut self, quantity: u64) -> Result<Self, SemanticError> {
-		self.invoice_request.inner.offer.check_quantity(Some(quantity))?;
-		self.invoice_request.inner.quantity = Some(quantity);
+		self.invoice_request.offer.check_quantity(Some(quantity))?;
+		self.invoice_request.quantity = Some(quantity);
 		Ok(self)
 	}
 
@@ -143,7 +177,7 @@ impl<'a> InvoiceRequestBuilder<'a> {
 	///
 	/// Successive calls to this method will override the previous setting.
 	pub fn payer_note(mut self, payer_note: String) -> Self {
-		self.invoice_request.inner.payer_note = Some(payer_note);
+		self.invoice_request.payer_note = Some(payer_note);
 		self
 	}
 
@@ -156,26 +190,60 @@ impl<'a> InvoiceRequestBuilder<'a> {
 			}
 		}
 
+		// Create the metadata for stateless verification of an Invoice.
+		if let Some(mut metadata_material) = self.metadata.material_mut() {
+			debug_assert!(self.invoice_request.payer.0.is_empty());
+			let mut tlv_stream = self.invoice_request.as_tlv_stream();
+			debug_assert!(tlv_stream.2.payer_id.is_none());
+			tlv_stream.0.metadata = None;
+			tlv_stream.write(&mut metadata_material).unwrap();
+		}
+
+		let (metadata, payer_id) = self.metadata.into_parts();
+		let payer_id = match payer_id {
+			Some(payer_id) => {
+				debug_assert!(self.payer_id.is_none());
+				payer_id
+			},
+			None => {
+				debug_assert!(self.payer_id.is_some());
+				self.payer_id.unwrap()
+			},
+		};
+
+		if let Some(metadata) = metadata {
+			self.invoice_request.payer.0 = metadata;
+		}
+
+		if self.invoice_request.payer.0.is_empty() {
+			return Err(SemanticError::MissingPayerMetadata);
+		}
+
 		let chain = self.invoice_request.chain();
 		if !self.offer.supports_chain(chain) {
 			return Err(SemanticError::UnsupportedChain);
 		}
 
 		if chain == self.offer.implied_chain() {
-			self.invoice_request.inner.chain = None;
+			self.invoice_request.chain = None;
 		}
 
-		if self.offer.amount().is_none() && self.invoice_request.inner.amount_msats.is_none() {
+		if self.offer.amount().is_none() && self.invoice_request.amount_msats.is_none() {
 			return Err(SemanticError::MissingAmount);
 		}
 
-		self.invoice_request.inner.offer.check_quantity(self.invoice_request.inner.quantity)?;
-		self.invoice_request.inner.offer.check_amount_msats_for_quantity(
-			self.invoice_request.inner.amount_msats, self.invoice_request.inner.quantity
+		self.invoice_request.offer.check_quantity(self.invoice_request.quantity)?;
+		self.invoice_request.offer.check_amount_msats_for_quantity(
+			self.invoice_request.amount_msats, self.invoice_request.quantity
 		)?;
 
-		let InvoiceRequestBuilder { offer, invoice_request } = self;
-		Ok(UnsignedInvoiceRequest { offer, invoice_request })
+		Ok(UnsignedInvoiceRequest {
+			offer: self.offer,
+			invoice_request: InvoiceRequestContents {
+				inner: self.invoice_request,
+				payer_id,
+			},
+		})
 	}
 }
 
@@ -183,28 +251,58 @@ impl<'a> InvoiceRequestBuilder<'a> {
 impl<'a> InvoiceRequestBuilder<'a> {
 	fn chain_unchecked(mut self, network: Network) -> Self {
 		let chain = ChainHash::using_genesis_block(network);
-		self.invoice_request.inner.chain = Some(chain);
+		self.invoice_request.chain = Some(chain);
 		self
 	}
 
 	fn amount_msats_unchecked(mut self, amount_msats: u64) -> Self {
-		self.invoice_request.inner.amount_msats = Some(amount_msats);
+		self.invoice_request.amount_msats = Some(amount_msats);
 		self
 	}
 
 	fn features_unchecked(mut self, features: InvoiceRequestFeatures) -> Self {
-		self.invoice_request.inner.features = features;
+		self.invoice_request.features = features;
 		self
 	}
 
 	fn quantity_unchecked(mut self, quantity: u64) -> Self {
-		self.invoice_request.inner.quantity = Some(quantity);
+		self.invoice_request.quantity = Some(quantity);
 		self
 	}
 
-	pub(super) fn build_unchecked(self) -> UnsignedInvoiceRequest<'a> {
-		let InvoiceRequestBuilder { offer, invoice_request } = self;
-		UnsignedInvoiceRequest { offer, invoice_request }
+	pub(super) fn build_unchecked(mut self) -> UnsignedInvoiceRequest<'a> {
+		// Create the metadata for stateless verification of an Invoice.
+		if let Some(mut metadata_material) = self.metadata.material_mut() {
+			debug_assert!(self.invoice_request.payer.0.is_empty());
+			let mut tlv_stream = self.invoice_request.as_tlv_stream();
+			debug_assert!(tlv_stream.2.payer_id.is_none());
+			tlv_stream.0.metadata = None;
+			tlv_stream.write(&mut metadata_material).unwrap();
+		}
+
+		let (metadata, payer_id) = self.metadata.into_parts();
+		let payer_id = match payer_id {
+			Some(payer_id) => {
+				debug_assert!(self.payer_id.is_none());
+				payer_id
+			},
+			None => {
+				debug_assert!(self.payer_id.is_some());
+				self.payer_id.unwrap()
+			},
+		};
+
+		if let Some(metadata) = metadata {
+			self.invoice_request.payer.0 = metadata;
+		}
+
+		UnsignedInvoiceRequest {
+			offer: self.offer,
+			invoice_request: InvoiceRequestContents {
+				inner: self.invoice_request,
+				payer_id,
+			},
+		}
 	}
 }
 
@@ -1036,7 +1134,7 @@ mod tests {
 		let invoice_request = OfferBuilder::new("foo".into(), recipient_pubkey())
 			.amount_msats(1000)
 			.build().unwrap()
-			.request_invoice(vec![42; 32], payer_pubkey()).unwrap()
+			.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
 			.build().unwrap()
 			.sign(payer_sign).unwrap();
 

@@ -441,6 +441,44 @@ impl Offer {
 		Ok(InvoiceRequestBuilder::new(self, metadata, payer_id))
 	}
 
+	/// Similar to [`Offer::request_invoice`] except it:
+	/// - derives the [`InvoiceRequest::payer_id`] such that a different key can be used for each
+	///   request, and
+	/// - sets the [`InvoiceRequest::metadata`] when [`InvoiceRequestBuilder::build`] is called such
+	///   that it can be used by [`Invoice::verify`] to determine if the invoice was requested using
+	///   a base [`ExpandedKey`] from which the payer id was derived.
+	///
+	/// [`Invoice::verify`]: crate::offers::invoice::Invoice::verify
+	/// [`ExpandedKey`]: crate::ln::inbound_payment::ExpandedKey
+	#[allow(unused)]
+	pub(crate) fn request_invoice_deriving_payer_id(
+		&self, expanded_key: &ExpandedKey, nonce: Nonce
+	) -> Result<InvoiceRequestBuilder, SemanticError> {
+		if self.features().requires_unknown_bits() {
+			return Err(SemanticError::UnknownRequiredFeatures);
+		}
+
+		Ok(InvoiceRequestBuilder::deriving_payer_id(self, expanded_key, nonce))
+	}
+
+	/// Similar to [`Offer::request_invoice`] except it:
+	/// - sets the [`InvoiceRequest::metadata`] when [`InvoiceRequestBuilder::build`] is called such
+	///   that it can be used by [`Invoice::verify`] to determine if the invoice was requested using
+	///   a base [`ExpandedKey`].
+	///
+	/// [`Invoice::verify`]: crate::offers::invoice::Invoice::verify
+	/// [`ExpandedKey`]: crate::ln::inbound_payment::ExpandedKey
+	#[allow(unused)]
+	pub(crate) fn request_invoice_deriving_metadata(
+		&self, node_id: PublicKey, expanded_key: &ExpandedKey, nonce: Nonce
+	) -> Result<InvoiceRequestBuilder, SemanticError> {
+		if self.features().requires_unknown_bits() {
+			return Err(SemanticError::UnknownRequiredFeatures);
+		}
+
+		Ok(InvoiceRequestBuilder::deriving_metadata(self, node_id, expanded_key, nonce))
+	}
+
 	#[cfg(test)]
 	pub(super) fn as_tlv_stream(&self) -> OfferTlvStreamRef {
 		self.contents.as_tlv_stream()
