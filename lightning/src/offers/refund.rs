@@ -80,13 +80,14 @@ use core::time::Duration;
 use crate::io;
 use crate::ln::PaymentHash;
 use crate::ln::features::InvoiceRequestFeatures;
+use crate::ln::inbound_payment::{ExpandedKey, Nonce};
 use crate::ln::msgs::{DecodeError, MAX_VALUE_MSAT};
 use crate::offers::invoice::{BlindedPayInfo, InvoiceBuilder};
 use crate::offers::invoice_request::{InvoiceRequestTlvStream, InvoiceRequestTlvStreamRef};
 use crate::offers::offer::{OfferTlvStream, OfferTlvStreamRef};
 use crate::offers::parse::{Bech32Encode, ParseError, ParsedMessage, SemanticError};
 use crate::offers::payer::{PayerContents, PayerTlvStream, PayerTlvStreamRef};
-use crate::offers::signer::Metadata;
+use crate::offers::signer::{Metadata, MetadataMaterial};
 use crate::onion_message::BlindedPath;
 use crate::util::ser::{SeekReadable, WithoutLength, Writeable, Writer};
 use crate::util::string::PrintableString;
@@ -103,6 +104,7 @@ use std::time::SystemTime;
 /// [module-level documentation]: self
 pub struct RefundBuilder {
 	refund: RefundContents,
+	metadata: Metadata,
 }
 
 impl RefundBuilder {
@@ -119,13 +121,43 @@ impl RefundBuilder {
 		}
 
 		let metadata = Metadata::Bytes(metadata);
-		let refund = RefundContents {
-			payer: PayerContents(metadata), description, absolute_expiry: None, issuer: None,
-			paths: None, chain: None, amount_msats, features: InvoiceRequestFeatures::empty(),
-			quantity: None, payer_id, payer_note: None,
-		};
+		Ok(Self {
+			refund: RefundContents {
+				payer: PayerContents(metadata), description, absolute_expiry: None, issuer: None,
+				paths: None, chain: None, amount_msats, features: InvoiceRequestFeatures::empty(),
+				quantity: None, payer_id, payer_note: None,
+			},
+			metadata: Metadata::Empty,
+		})
+	}
 
-		Ok(RefundBuilder { refund })
+	/// Similar to [`RefundBuilder::new`] except, if [`RefundBuilder::path`] is not called, the
+	/// payer id is derived from the given [`ExpandedKey`] and nonce. This provides sender privacy
+	/// by using a different payer id for each refund, assuming a different nonce is used.
+	/// Otherwise, the provided `node_id` is used for the payer id.
+	///
+	/// Also, sets the metadata when [`RefundBuilder::build`] is called such that it can be used to
+	/// verify that an [`InvoiceRequest`] was produced for the refund given an [`ExpandedKey`].
+	///
+	/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
+	/// [`ExpandedKey`]: crate::ln::inbound_payment::ExpandedKey
+	#[allow(unused)]
+	pub(crate) fn deriving_payer_id(
+		description: String, node_id: PublicKey, expanded_key: &ExpandedKey, nonce: Nonce,
+		amount_msats: u64
+	) -> Result<Self, SemanticError> {
+		if amount_msats > MAX_VALUE_MSAT {
+			return Err(SemanticError::InvalidAmount);
+		}
+
+		Ok(Self {
+			refund: RefundContents {
+				payer: PayerContents(vec![]), description, absolute_expiry: None, issuer: None,
+				paths: None, chain: None, amount_msats, features: InvoiceRequestFeatures::empty(),
+				quantity: None, payer_id: node_id, payer_note: None,
+			},
+			metadata: Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key)),
+		})
 	}
 
 	/// Sets the [`Refund::absolute_expiry`] as seconds since the Unix epoch. Any expiry that has
@@ -192,13 +224,33 @@ impl RefundBuilder {
 			self.refund.chain = None;
 		}
 
+		// Create the metadata for stateless verification of an Invoice.
+		if let Some(mut metadata_material) = self.metadata.material_mut() {
+			debug_assert!(self.refund.payer.0.is_empty());
+			let mut tlv_stream = self.refund.as_tlv_stream();
+			tlv_stream.0.metadata = None;
+			tlv_stream.2.payer_id = None;
+			tlv_stream.write(&mut metadata_material).unwrap();
+
+			if self.refund.paths.is_none() {
+				self.metadata = Metadata::Derived(metadata_material.clone());
+			}
+		}
+
+		let (metadata, keys) = self.metadata.into_parts();
+
+		if let Some(metadata) = metadata {
+			self.refund.payer.0 = metadata;
+		}
+
+		if let Some(keys) = keys {
+			self.refund.payer_id = keys.public_key();
+		}
+
 		let mut bytes = Vec::new();
 		self.refund.write(&mut bytes).unwrap();
 
-		Ok(Refund {
-			bytes,
-			contents: self.refund,
-		})
+		Ok(Refund { bytes, contents: self.refund })
 	}
 }
 
