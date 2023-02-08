@@ -75,9 +75,11 @@ use core::str::FromStr;
 use core::time::Duration;
 use crate::io;
 use crate::ln::features::OfferFeatures;
+use crate::ln::inbound_payment::{ExpandedKey, Nonce};
 use crate::ln::msgs::MAX_VALUE_MSAT;
 use crate::offers::invoice_request::InvoiceRequestBuilder;
 use crate::offers::parse::{Bech32Encode, ParseError, ParsedMessage, SemanticError};
+use crate::offers::signer::{Metadata, MetadataMaterial};
 use crate::onion_message::BlindedPath;
 use crate::util::ser::{HighZeroBytesDroppedBigSize, WithoutLength, Writeable, Writer};
 use crate::util::string::PrintableString;
@@ -94,6 +96,7 @@ use std::time::SystemTime;
 /// [module-level documentation]: self
 pub struct OfferBuilder {
 	offer: OfferContents,
+	metadata: Metadata,
 }
 
 impl OfferBuilder {
@@ -103,12 +106,38 @@ impl OfferBuilder {
 	///
 	/// Use a different pubkey per offer to avoid correlating offers.
 	pub fn new(description: String, signing_pubkey: PublicKey) -> Self {
-		let offer = OfferContents {
-			chains: None, metadata: None, amount: None, description,
-			features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
-			supported_quantity: Quantity::One, signing_pubkey,
-		};
-		OfferBuilder { offer }
+		OfferBuilder {
+			offer: OfferContents {
+				chains: None, metadata: None, amount: None, description,
+				features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
+				supported_quantity: Quantity::One, signing_pubkey,
+			},
+			metadata: Metadata::Empty,
+		}
+	}
+
+	/// Similar to [`OfferBuilder::new`] except, if [`OfferBuilder::path`] is not called, the
+	/// signing pubkey is derived from the given [`ExpandedKey`] and nonce. This provides recipient
+	/// privacy by using a different signing pubkey for each offer, assuming a different nonce is
+	/// used. Otherwise, the provided `node_id` is used for the signing pubkey.
+	///
+	/// Also, sets the metadata when [`OfferBuilder::build`] is called such that it can be used to
+	/// verify that an [`InvoiceRequest`] was produced for the offer given an [`ExpandedKey`].
+	///
+	/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
+	/// [`ExpandedKey`]: crate::ln::inbound_payment::ExpandedKey
+	#[allow(unused)]
+	pub(crate) fn deriving_signing_pubkey(
+		description: String, node_id: PublicKey, expanded_key: &ExpandedKey, nonce: Nonce
+	) -> Self {
+		OfferBuilder {
+			offer: OfferContents {
+				chains: None, metadata: None, amount: None, description,
+				features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
+				supported_quantity: Quantity::One, signing_pubkey: node_id,
+			},
+			metadata: Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key)),
+		}
 	}
 
 	/// Adds the chain hash of the given [`Network`] to [`Offer::chains`]. If not called,
@@ -127,12 +156,17 @@ impl OfferBuilder {
 		self
 	}
 
-	/// Sets the [`Offer::metadata`].
+	/// Sets the [`Offer::metadata`] to the given bytes.
 	///
-	/// Successive calls to this method will override the previous setting.
-	pub fn metadata(mut self, metadata: Vec<u8>) -> Self {
-		self.offer.metadata = Some(metadata);
-		self
+	/// Successive calls to this method will override the previous setting. Errors if the builder
+	/// was constructed using a derived pubkey.
+	pub fn metadata(mut self, metadata: Vec<u8>) -> Result<Self, SemanticError> {
+		if self.metadata.material().is_some() {
+			return Err(SemanticError::UnexpectedMetadata);
+		}
+
+		self.metadata = Metadata::Bytes(metadata);
+		Ok(self)
 	}
 
 	/// Sets the [`Offer::amount`] as an [`Amount::Bitcoin`].
@@ -204,13 +238,36 @@ impl OfferBuilder {
 			}
 		}
 
+		Ok(self.build_without_checks())
+	}
+
+	fn build_without_checks(mut self) -> Offer {
+		// Create the metadata for stateless verification of an InvoiceRequest.
+		if let Some(metadata_material) = self.metadata.material_mut() {
+			let mut tlv_stream = self.offer.as_tlv_stream();
+			tlv_stream.metadata = None;
+			tlv_stream.node_id = None;
+			tlv_stream.write(metadata_material).unwrap();
+
+			if self.offer.paths.is_none() {
+				self.metadata = Metadata::Derived(metadata_material.clone());
+			}
+		}
+
+		let (metadata, signing_pubkey) = self.metadata.into_parts();
+
+		if let Some(metadata) = metadata {
+			self.offer.metadata = Some(metadata);
+		}
+
+		if let Some(signing_pubkey) = signing_pubkey {
+			self.offer.signing_pubkey = signing_pubkey;
+		}
+
 		let mut bytes = Vec::new();
 		self.offer.write(&mut bytes).unwrap();
 
-		Ok(Offer {
-			bytes,
-			contents: self.offer,
-		})
+		Offer { bytes, contents: self.offer }
 	}
 }
 
@@ -222,10 +279,7 @@ impl OfferBuilder {
 	}
 
 	pub(super) fn build_unchecked(self) -> Offer {
-		let mut bytes = Vec::new();
-		self.offer.write(&mut bytes).unwrap();
-
-		Offer { bytes, contents: self.offer }
+		self.build_without_checks()
 	}
 }
 
@@ -765,15 +819,15 @@ mod tests {
 	#[test]
 	fn builds_offer_with_metadata() {
 		let offer = OfferBuilder::new("foo".into(), pubkey(42))
-			.metadata(vec![42; 32])
+			.metadata(vec![42; 32]).unwrap()
 			.build()
 			.unwrap();
 		assert_eq!(offer.metadata(), Some(&vec![42; 32]));
 		assert_eq!(offer.as_tlv_stream().metadata, Some(&vec![42; 32]));
 
 		let offer = OfferBuilder::new("foo".into(), pubkey(42))
-			.metadata(vec![42; 32])
-			.metadata(vec![43; 32])
+			.metadata(vec![42; 32]).unwrap()
+			.metadata(vec![43; 32]).unwrap()
 			.build()
 			.unwrap();
 		assert_eq!(offer.metadata(), Some(&vec![43; 32]));
