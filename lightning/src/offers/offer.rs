@@ -75,9 +75,11 @@ use core::str::FromStr;
 use core::time::Duration;
 use crate::io;
 use crate::ln::features::OfferFeatures;
+use crate::ln::inbound_payment::{ExpandedKey, Nonce};
 use crate::ln::msgs::MAX_VALUE_MSAT;
 use crate::offers::invoice_request::InvoiceRequestBuilder;
 use crate::offers::parse::{Bech32Encode, ParseError, ParsedMessage, SemanticError};
+use crate::offers::signer::{MetadataMaterial, DerivedPubkey};
 use crate::onion_message::BlindedPath;
 use crate::util::ser::{HighZeroBytesDroppedBigSize, WithoutLength, Writeable, Writer};
 use crate::util::string::PrintableString;
@@ -94,6 +96,7 @@ use std::time::SystemTime;
 /// [module-level documentation]: self
 pub struct OfferBuilder {
 	offer: OfferContents,
+	metadata_material: Option<MetadataMaterial>,
 }
 
 impl OfferBuilder {
@@ -108,7 +111,28 @@ impl OfferBuilder {
 			features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
 			supported_quantity: Quantity::One, signing_pubkey,
 		};
-		OfferBuilder { offer }
+		OfferBuilder { offer, metadata_material: None }
+	}
+
+	/// Similar to [`OfferBuilder::new`] except it:
+	/// - derives the signing pubkey such that a different key can be used for each offer, and
+	/// - sets the metadata when [`OfferBuilder::build`] is called such that it can be used by
+	///   [`InvoiceRequest::verify`] to determine if the request was produced using a base
+	///   [`ExpandedKey`] from which the signing pubkey was derived.
+	///
+	/// [`InvoiceRequest::verify`]: crate::offers::invoice_request::InvoiceRequest::verify
+	/// [`ExpandedKey`]: crate::ln::inbound_payment::ExpandedKey
+	#[allow(unused)]
+	pub(crate) fn deriving_signing_pubkey(
+		description: String, signing_pubkey: DerivedPubkey
+	) -> Self {
+		let (signing_pubkey, metadata_material) = signing_pubkey.into_parts();
+		let offer = OfferContents {
+			chains: None, metadata: None, amount: None, description,
+			features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
+			supported_quantity: Quantity::One, signing_pubkey,
+		};
+		OfferBuilder { offer, metadata_material: Some(metadata_material) }
 	}
 
 	/// Adds the chain hash of the given [`Network`] to [`Offer::chains`]. If not called,
@@ -127,12 +151,38 @@ impl OfferBuilder {
 		self
 	}
 
-	/// Sets the [`Offer::metadata`].
+	/// Sets the [`Offer::metadata`] to the given bytes.
 	///
-	/// Successive calls to this method will override the previous setting.
-	pub fn metadata(mut self, metadata: Vec<u8>) -> Self {
+	/// Successive calls to this method will override the previous setting. Errors if the builder
+	/// was constructed using a derived pubkey.
+	pub fn metadata(mut self, metadata: Vec<u8>) -> Result<Self, SemanticError> {
+		if self.metadata_material.is_some() {
+			return Err(SemanticError::UnexpectedMetadata);
+		}
+
 		self.offer.metadata = Some(metadata);
-		self
+		Ok(self)
+	}
+
+	/// Sets the [`Offer::metadata`] derived from the given `key` and any fields set prior to
+	/// calling [`OfferBuilder::build`]. Allows for stateless verification of an [`InvoiceRequest`]
+	/// when using a public node id as the [`Offer::signing_pubkey`] instead of a derived one.
+	///
+	/// Errors if already called or if the builder was constructed with
+	/// [`Self::deriving_signing_pubkey`].
+	///
+	/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
+	#[allow(unused)]
+	pub(crate) fn metadata_derived(
+		mut self, key: &ExpandedKey, nonce: Nonce
+	) -> Result<Self, SemanticError> {
+		if self.metadata_material.is_some() {
+			return Err(SemanticError::UnexpectedMetadata);
+		}
+
+		self.offer.metadata = None;
+		self.metadata_material = Some(MetadataMaterial::new(nonce, key));
+		Ok(self)
 	}
 
 	/// Sets the [`Offer::amount`] as an [`Amount::Bitcoin`].
@@ -202,6 +252,16 @@ impl OfferBuilder {
 			if chains.len() == 1 && chains[0] == self.offer.implied_chain() {
 				self.offer.chains = None;
 			}
+		}
+
+		// Create the metadata for stateless verification of an InvoiceRequest.
+		if let Some(mut metadata_material) = self.metadata_material {
+			debug_assert!(self.offer.metadata.is_none());
+			let mut tlv_stream = self.offer.as_tlv_stream();
+			tlv_stream.node_id = None;
+			tlv_stream.write(&mut metadata_material).unwrap();
+
+			self.offer.metadata = Some(metadata_material.into_metadata());
 		}
 
 		let mut bytes = Vec::new();
@@ -765,15 +825,15 @@ mod tests {
 	#[test]
 	fn builds_offer_with_metadata() {
 		let offer = OfferBuilder::new("foo".into(), pubkey(42))
-			.metadata(vec![42; 32])
+			.metadata(vec![42; 32]).unwrap()
 			.build()
 			.unwrap();
 		assert_eq!(offer.metadata(), Some(&vec![42; 32]));
 		assert_eq!(offer.as_tlv_stream().metadata, Some(&vec![42; 32]));
 
 		let offer = OfferBuilder::new("foo".into(), pubkey(42))
-			.metadata(vec![42; 32])
-			.metadata(vec![43; 32])
+			.metadata(vec![42; 32]).unwrap()
+			.metadata(vec![43; 32]).unwrap()
 			.build()
 			.unwrap();
 		assert_eq!(offer.metadata(), Some(&vec![43; 32]));
