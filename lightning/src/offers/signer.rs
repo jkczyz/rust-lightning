@@ -16,6 +16,7 @@ use core::convert::TryInto;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use crate::io;
 use crate::ln::inbound_payment::{ExpandedKey, Nonce};
+use crate::offers::merkle::TlvRecord;
 
 use crate::prelude::*;
 
@@ -99,4 +100,25 @@ impl io::Write for MetadataMaterial {
 	fn flush(&mut self) -> io::Result<()> {
 		self.hmac.flush()
 	}
+}
+
+/// Verifies data given in a TLV stream was used to produce the given metadata, consisting of:
+/// - a 128-bit [`Nonce`] and
+/// - a [`Sha256Hash`] of the nonce and the TLV records using the [`ExpandedKey`].
+pub(super) fn verify_metadata<'a>(
+	metadata: &Vec<u8>, expanded_key: &ExpandedKey,
+	tlv_stream: impl core::iter::Iterator<Item = TlvRecord<'a>>
+) -> bool {
+	let mut hmac = if metadata.len() < Nonce::LENGTH {
+		return false;
+	} else {
+		let nonce = Nonce(metadata[..Nonce::LENGTH].try_into().unwrap());
+		expanded_key.hmac_for_offer(nonce)
+	};
+
+	for record in tlv_stream {
+		hmac.input(record.record_bytes);
+	}
+
+	&metadata[Nonce::LENGTH..] == &Hmac::from_engine(hmac).into_inner()
 }
