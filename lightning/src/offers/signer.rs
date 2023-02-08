@@ -17,6 +17,7 @@ use core::fmt;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use crate::io;
 use crate::ln::inbound_payment::{EncryptedNonce, ExpandedKey, Nonce};
+use crate::offers::merkle::TlvRecord;
 
 use crate::prelude::*;
 
@@ -133,5 +134,36 @@ impl io::Write for MetadataMaterial {
 
 	fn flush(&mut self) -> io::Result<()> {
 		self.hmac.flush()
+	}
+}
+
+/// Verifies data given in a TLV stream was used to produce the given metadata, consisting of:
+/// - a 128-bit [`Nonce`] and possibly
+/// - a [`Sha256Hash`] of the nonce and the TLV records using the [`ExpandedKey`].
+///
+/// If the latter is not included in the metadata, the TLV stream is used to check if the given
+/// `signing_pubkey` can be derived from it.
+pub(super) fn verify_metadata<'a>(
+	metadata: &Vec<u8>, expanded_key: &ExpandedKey, signing_pubkey: PublicKey,
+	tlv_stream: impl core::iter::Iterator<Item = TlvRecord<'a>>
+) -> bool {
+	if metadata.len() < Nonce::LENGTH {
+		return false;
+	}
+
+	let nonce = Nonce(metadata[..Nonce::LENGTH].try_into().unwrap());
+	let mut hmac = expanded_key.hmac_for_offer(nonce);
+
+	for record in tlv_stream {
+		hmac.input(record.record_bytes);
+	}
+
+	if metadata.len() == Nonce::LENGTH {
+		let secp_ctx = Secp256k1::new();
+		let hmac = Hmac::from_engine(hmac);
+		let derived_pubkey = SecretKey::from_slice(hmac.as_inner()).unwrap().public_key(&secp_ctx);
+		signing_pubkey == derived_pubkey
+	} else {
+		&metadata[Nonce::LENGTH..] == &Hmac::from_engine(hmac).into_inner()
 	}
 }

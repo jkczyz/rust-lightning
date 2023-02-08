@@ -60,9 +60,10 @@ use core::convert::TryFrom;
 use crate::io;
 use crate::ln::PaymentHash;
 use crate::ln::features::InvoiceRequestFeatures;
+use crate::ln::inbound_payment::ExpandedKey;
 use crate::ln::msgs::DecodeError;
 use crate::offers::invoice::{BlindedPayInfo, InvoiceBuilder};
-use crate::offers::merkle::{SignError, SignatureTlvStream, SignatureTlvStreamRef, self};
+use crate::offers::merkle::{SignError, SignatureTlvStream, SignatureTlvStreamRef, TlvStream, self};
 use crate::offers::offer::{Offer, OfferContents, OfferTlvStream, OfferTlvStreamRef};
 use crate::offers::parse::{ParseError, ParsedMessage, SemanticError};
 use crate::offers::payer::{PayerContents, PayerTlvStream, PayerTlvStreamRef};
@@ -368,6 +369,12 @@ impl InvoiceRequest {
 		}
 
 		InvoiceBuilder::for_offer(self, payment_paths, created_at, payment_hash)
+	}
+
+	/// Verifies that the request was for an offer created using the given key.
+	#[allow(unused)]
+	pub(crate) fn verify(&self, key: &ExpandedKey) -> bool {
+		self.contents.offer.verify(TlvStream::new(&self.bytes), key)
 	}
 
 	#[cfg(test)]
