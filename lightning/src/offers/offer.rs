@@ -605,7 +605,7 @@ impl OfferContents {
 						_ => true,
 					}
 				});
-				signer::verify_metadata(metadata, key, tlv_stream)
+				signer::verify_metadata(metadata, key, self.signing_pubkey(), tlv_stream)
 			},
 			None => false,
 		}
@@ -811,7 +811,6 @@ mod tests {
 	use crate::ln::inbound_payment::{ExpandedKey, Nonce};
 	use crate::ln::msgs::{DecodeError, MAX_VALUE_MSAT};
 	use crate::offers::parse::{ParseError, SemanticError};
-	use crate::offers::signer::DerivedPubkey;
 	use crate::offers::test_utils::*;
 	use crate::onion_message::{BlindedHop, BlindedPath};
 	use crate::util::ser::{BigSize, Writeable};
@@ -963,12 +962,10 @@ mod tests {
 		let expanded_key = ExpandedKey::new(&KeyMaterial([42; 32]));
 		let nonce = Nonce([42; Nonce::LENGTH]);
 
-		let recipient_pubkey = DerivedPubkey::new(&expanded_key, nonce);
-		let offer = OfferBuilder::deriving_signing_pubkey("foo".into(), recipient_pubkey)
+		let offer = OfferBuilder::deriving_signing_pubkey("foo".into(), &expanded_key, nonce)
 			.amount_msats(1000)
 			.build().unwrap();
-		assert_eq!(offer.metadata().unwrap()[..Nonce::LENGTH], nonce.0);
-		assert_eq!(offer.signing_pubkey(), expanded_key.signing_pubkey_for_offer(nonce));
+		assert_eq!(offer.metadata().unwrap()[..], nonce.0);
 
 		let invoice_request = offer.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
 			.build().unwrap()
@@ -987,8 +984,7 @@ mod tests {
 			.sign(payer_sign).unwrap();
 		assert!(!invoice_request.verify(&expanded_key));
 
-		let recipient_pubkey = DerivedPubkey::new(&expanded_key, nonce);
-		match OfferBuilder::deriving_signing_pubkey("foo".into(), recipient_pubkey)
+		match OfferBuilder::deriving_signing_pubkey("foo".into(), &expanded_key, nonce)
 			.metadata_derived(&expanded_key, nonce)
 		{
 			Ok(_) => panic!("expected error"),
