@@ -383,7 +383,7 @@ impl InvoiceRequest {
 
 impl InvoiceRequestContents {
 	pub(super) fn chain(&self) -> ChainHash {
-		self.chain.unwrap_or_else(|| self.offer.implied_chain())
+		self.chain.unwrap_or_else(|| OfferContents::implied_chain())
 	}
 
 	pub(super) fn as_tlv_stream(&self) -> PartialInvoiceRequestTlvStreamRef {
@@ -502,7 +502,7 @@ impl TryFrom<PartialInvoiceRequestTlvStream> for InvoiceRequestContents {
 		};
 		let offer = OfferContents::try_from(offer_tlv_stream)?;
 
-		if !offer.supports_chain(chain.unwrap_or_else(|| offer.implied_chain())) {
+		if !offer.supports_chain(chain.unwrap_or_else(|| OfferContents::implied_chain())) {
 			return Err(SemanticError::UnsupportedChain);
 		}
 

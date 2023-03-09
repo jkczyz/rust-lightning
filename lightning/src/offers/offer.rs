@@ -79,7 +79,7 @@ use crate::ln::inbound_payment::{ExpandedKey, Nonce};
 use crate::ln::msgs::MAX_VALUE_MSAT;
 use crate::offers::invoice_request::InvoiceRequestBuilder;
 use crate::offers::parse::{Bech32Encode, ParseError, ParsedMessage, SemanticError};
-use crate::offers::signer::{MetadataMaterial, DerivedPubkey};
+use crate::offers::signer::{Metadata, MetadataMaterial};
 use crate::onion_message::BlindedPath;
 use crate::util::ser::{HighZeroBytesDroppedBigSize, WithoutLength, Writeable, Writer};
 use crate::util::string::PrintableString;
@@ -95,8 +95,16 @@ use std::time::SystemTime;
 ///
 /// [module-level documentation]: self
 pub struct OfferBuilder {
-	offer: OfferContents,
-	metadata_material: Option<MetadataMaterial>,
+	chains: Option<Vec<ChainHash>>,
+	metadata: Metadata,
+	amount: Option<Amount>,
+	description: String,
+	features: OfferFeatures,
+	absolute_expiry: Option<Duration>,
+	issuer: Option<String>,
+	paths: Option<Vec<BlindedPath>>,
+	supported_quantity: Quantity,
+	signing_pubkey: Option<PublicKey>,
 }
 
 impl OfferBuilder {
@@ -106,12 +114,11 @@ impl OfferBuilder {
 	///
 	/// Use a different pubkey per offer to avoid correlating offers.
 	pub fn new(description: String, signing_pubkey: PublicKey) -> Self {
-		let offer = OfferContents {
-			chains: None, metadata: None, amount: None, description,
+		OfferBuilder {
+			chains: None, metadata: Metadata::Empty, amount: None, description,
 			features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
-			supported_quantity: Quantity::One, signing_pubkey,
-		};
-		OfferBuilder { offer, metadata_material: None }
+			supported_quantity: Quantity::One, signing_pubkey: Some(signing_pubkey),
+		}
 	}
 
 	/// Similar to [`OfferBuilder::new`] except it:
@@ -124,15 +131,14 @@ impl OfferBuilder {
 	/// [`ExpandedKey`]: crate::ln::inbound_payment::ExpandedKey
 	#[allow(unused)]
 	pub(crate) fn deriving_signing_pubkey(
-		description: String, signing_pubkey: DerivedPubkey
+		description: String, expanded_key: &ExpandedKey, nonce: Nonce
 	) -> Self {
-		let (signing_pubkey, metadata_material) = signing_pubkey.into_parts();
-		let offer = OfferContents {
-			chains: None, metadata: None, amount: None, description,
-			features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
-			supported_quantity: Quantity::One, signing_pubkey,
-		};
-		OfferBuilder { offer, metadata_material: Some(metadata_material) }
+		let metadata = Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key));
+		OfferBuilder {
+			chains: None, metadata, amount: None, description, features: OfferFeatures::empty(),
+			absolute_expiry: None, issuer: None, paths: None, supported_quantity: Quantity::One,
+			signing_pubkey: None,
+		}
 	}
 
 	/// Adds the chain hash of the given [`Network`] to [`Offer::chains`]. If not called,
@@ -142,7 +148,7 @@ impl OfferBuilder {
 	///
 	/// Successive calls to this method will add another chain hash.
 	pub fn chain(mut self, network: Network) -> Self {
-		let chains = self.offer.chains.get_or_insert_with(Vec::new);
+		let chains = self.chains.get_or_insert_with(Vec::new);
 		let chain = ChainHash::using_genesis_block(network);
 		if !chains.contains(&chain) {
 			chains.push(chain);
@@ -156,11 +162,11 @@ impl OfferBuilder {
 	/// Successive calls to this method will override the previous setting. Errors if the builder
 	/// was constructed using a derived pubkey.
 	pub fn metadata(mut self, metadata: Vec<u8>) -> Result<Self, SemanticError> {
-		if self.metadata_material.is_some() {
+		if self.metadata.material().is_some() {
 			return Err(SemanticError::UnexpectedMetadata);
 		}
 
-		self.offer.metadata = Some(metadata);
+		self.metadata = Metadata::Bytes(metadata);
 		Ok(self)
 	}
 
@@ -174,14 +180,13 @@ impl OfferBuilder {
 	/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
 	#[allow(unused)]
 	pub(crate) fn metadata_derived(
-		mut self, key: &ExpandedKey, nonce: Nonce
+		mut self, expanded_key: &ExpandedKey, nonce: Nonce
 	) -> Result<Self, SemanticError> {
-		if self.metadata_material.is_some() {
+		if self.metadata.material().is_some() {
 			return Err(SemanticError::UnexpectedMetadata);
 		}
 
-		self.offer.metadata = None;
-		self.metadata_material = Some(MetadataMaterial::new(nonce, key));
+		self.metadata = Metadata::Derived(MetadataMaterial::new(nonce, expanded_key));
 		Ok(self)
 	}
 
@@ -196,7 +201,7 @@ impl OfferBuilder {
 	///
 	/// Successive calls to this method will override the previous setting.
 	pub(super) fn amount(mut self, amount: Amount) -> Self {
-		self.offer.amount = Some(amount);
+		self.amount = Some(amount);
 		self
 	}
 
@@ -205,7 +210,7 @@ impl OfferBuilder {
 	///
 	/// Successive calls to this method will override the previous setting.
 	pub fn absolute_expiry(mut self, absolute_expiry: Duration) -> Self {
-		self.offer.absolute_expiry = Some(absolute_expiry);
+		self.absolute_expiry = Some(absolute_expiry);
 		self
 	}
 
@@ -213,7 +218,7 @@ impl OfferBuilder {
 	///
 	/// Successive calls to this method will override the previous setting.
 	pub fn issuer(mut self, issuer: String) -> Self {
-		self.offer.issuer = Some(issuer);
+		self.issuer = Some(issuer);
 		self
 	}
 
@@ -223,7 +228,7 @@ impl OfferBuilder {
 	/// Successive calls to this method will add another blinded path. Caller is responsible for not
 	/// adding duplicate paths.
 	pub fn path(mut self, path: BlindedPath) -> Self {
-		self.offer.paths.get_or_insert_with(Vec::new).push(path);
+		self.paths.get_or_insert_with(Vec::new).push(path);
 		self
 	}
 
@@ -232,13 +237,13 @@ impl OfferBuilder {
 	///
 	/// Successive calls to this method will override the previous setting.
 	pub fn supported_quantity(mut self, quantity: Quantity) -> Self {
-		self.offer.supported_quantity = quantity;
+		self.supported_quantity = quantity;
 		self
 	}
 
 	/// Builds an [`Offer`] from the builder's settings.
 	pub fn build(mut self) -> Result<Offer, SemanticError> {
-		match self.offer.amount {
+		match self.amount {
 			Some(Amount::Bitcoin { amount_msats }) => {
 				if amount_msats > MAX_VALUE_MSAT {
 					return Err(SemanticError::InvalidAmount);
@@ -248,44 +253,88 @@ impl OfferBuilder {
 			None => {},
 		}
 
-		if let Some(chains) = &self.offer.chains {
-			if chains.len() == 1 && chains[0] == self.offer.implied_chain() {
-				self.offer.chains = None;
+		if let Some(chains) = &self.chains {
+			if chains.len() == 1 && chains[0] == OfferContents::implied_chain() {
+				self.chains = None;
 			}
 		}
 
-		// Create the metadata for stateless verification of an InvoiceRequest.
-		if let Some(mut metadata_material) = self.metadata_material {
-			debug_assert!(self.offer.metadata.is_none());
-			let mut tlv_stream = self.offer.as_tlv_stream();
-			tlv_stream.node_id = None;
-			tlv_stream.write(&mut metadata_material).unwrap();
+		Ok(self.build_without_checks())
+	}
 
-			self.offer.metadata = Some(metadata_material.into_metadata());
+	fn build_without_checks(mut self) -> Offer {
+		// Create the metadata for stateless verification of an InvoiceRequest.
+		if let Some(metadata_material) = self.metadata.material_mut() {
+			let (currency, amount) = match &self.amount {
+				None => (None, None),
+				Some(Amount::Bitcoin { amount_msats }) => (None, Some(*amount_msats)),
+				Some(Amount::Currency { iso4217_code, amount }) => (
+					Some(iso4217_code), Some(*amount)
+				),
+			};
+
+			let features = {
+				if self.features == OfferFeatures::empty() { None } else { Some(&self.features) }
+			};
+
+			let tlv_stream = OfferTlvStreamRef {
+				chains: self.chains.as_ref(),
+				metadata: None,
+				currency,
+				amount,
+				description: Some(&self.description),
+				features,
+				absolute_expiry: self.absolute_expiry.map(|duration| duration.as_secs()),
+				paths: self.paths.as_ref(),
+				issuer: self.issuer.as_ref(),
+				quantity_max: self.supported_quantity.to_tlv_record(),
+				node_id: None,
+			};
+
+			tlv_stream.write(metadata_material).unwrap();
 		}
 
-		let mut bytes = Vec::new();
-		self.offer.write(&mut bytes).unwrap();
+		let (metadata, signing_pubkey) = self.metadata.into_parts();
+		let signing_pubkey = match signing_pubkey {
+			Some(signing_pubkey) => {
+				debug_assert!(self.signing_pubkey.is_none());
+				signing_pubkey
+			},
+			None => {
+				debug_assert!(self.signing_pubkey.is_some());
+				self.signing_pubkey.unwrap()
+			},
+		};
 
-		Ok(Offer {
-			bytes,
-			contents: self.offer,
-		})
+		let contents = OfferContents {
+			chains: self.chains,
+			metadata,
+			amount: self.amount,
+			description: self.description,
+			features: self.features,
+			absolute_expiry: self.absolute_expiry,
+			issuer: self.issuer,
+			paths: self.paths,
+			supported_quantity: self.supported_quantity,
+			signing_pubkey,
+		};
+
+		let mut bytes = Vec::new();
+		contents.write(&mut bytes).unwrap();
+
+		Offer { bytes, contents }
 	}
 }
 
 #[cfg(test)]
 impl OfferBuilder {
 	fn features_unchecked(mut self, features: OfferFeatures) -> Self {
-		self.offer.features = features;
+		self.features = features;
 		self
 	}
 
 	pub(super) fn build_unchecked(self) -> Offer {
-		let mut bytes = Vec::new();
-		self.offer.write(&mut bytes).unwrap();
-
-		Offer { bytes, contents: self.offer }
+		self.build_without_checks()
 	}
 }
 
@@ -340,7 +389,7 @@ impl Offer {
 	}
 
 	pub(super) fn implied_chain(&self) -> ChainHash {
-		self.contents.implied_chain()
+		OfferContents::implied_chain()
 	}
 
 	/// Returns whether the given chain is supported by the offer.
@@ -455,10 +504,10 @@ impl AsRef<[u8]> for Offer {
 
 impl OfferContents {
 	pub fn chains(&self) -> Vec<ChainHash> {
-		self.chains.as_ref().cloned().unwrap_or_else(|| vec![self.implied_chain()])
+		self.chains.as_ref().cloned().unwrap_or_else(|| vec![Self::implied_chain()])
 	}
 
-	pub fn implied_chain(&self) -> ChainHash {
+	pub fn implied_chain() -> ChainHash {
 		ChainHash::using_genesis_block(Network::Bitcoin)
 	}
 
@@ -856,10 +905,7 @@ mod tests {
 
 		let builder = OfferBuilder::new("foo".into(), pubkey(42))
 			.amount(currency_amount.clone());
-		let tlv_stream = builder.offer.as_tlv_stream();
-		assert_eq!(builder.offer.amount, Some(currency_amount.clone()));
-		assert_eq!(tlv_stream.amount, Some(10));
-		assert_eq!(tlv_stream.currency, Some(b"USD"));
+		assert_eq!(builder.amount, Some(currency_amount.clone()));
 		match builder.build() {
 			Ok(_) => panic!("expected error"),
 			Err(e) => assert_eq!(e, SemanticError::UnsupportedCurrency),
@@ -1140,7 +1186,7 @@ mod tests {
 		}
 
 		let mut builder = OfferBuilder::new("foo".into(), pubkey(42));
-		builder.offer.paths = Some(vec![]);
+		builder.paths = Some(vec![]);
 
 		let offer = builder.build().unwrap();
 		if let Err(e) = offer.to_string().parse::<Offer>() {
