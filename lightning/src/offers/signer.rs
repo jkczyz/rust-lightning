@@ -15,7 +15,7 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use core::convert::TryInto;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use crate::io;
-use crate::ln::inbound_payment::{ExpandedKey, Nonce};
+use crate::ln::inbound_payment::{EncryptedNonce, ExpandedKey, Nonce};
 
 use crate::prelude::*;
 
@@ -65,15 +65,14 @@ impl Metadata {
 /// signing pubkey, if any.
 #[derive(Clone)]
 pub(super) struct MetadataMaterial {
-	nonce: Nonce,
+	nonce: EncryptedNonce,
 	hmac: HmacEngine<Sha256>,
 }
 
 impl MetadataMaterial {
 	pub fn new(nonce: Nonce, expanded_key: &ExpandedKey) -> Self {
 		Self {
-			// TODO: Encrypt nonce
-			nonce,
+			nonce: expanded_key.encyrpt_nonce_for_offer(nonce),
 			hmac: expanded_key.hmac_for_offer(nonce),
 		}
 	}

@@ -91,32 +91,55 @@ impl ExpandedKey {
 		let secp_ctx = Secp256k1::new();
 		SecretKey::from_slice(&hash).unwrap().public_key(&secp_ctx)
 	}
+
+	pub(crate) fn encyrpt_nonce_for_offer(&self, nonce: Nonce) -> EncryptedNonce {
+		let iv_bytes: &[u8; IV_LEN] = b"IVoffersIVoffers";
+
+		let mut encrypted_bytes = [0u8; EncryptedNonce::LENGTH];
+		let chacha_block = ChaCha20::get_single_block(&self.offers_base_key, iv_bytes);
+		for i in 0..METADATA_LEN {
+			encrypted_bytes[i] = chacha_block[i] ^ nonce.0[i];
+		}
+
+		EncryptedNonce(encrypted_bytes)
+	}
 }
 
 /// A 128-bit number used only once.
 ///
 /// Needed when constructing [`Offer::metadata`] and deriving [`Offer::signing_pubkey`] from
-/// [`ExpandedKey`].
+/// [`ExpandedKey`]. Must not be reused for any other derivation without first hashing.
 ///
 /// [`Offer::metadata`]: crate::offers::offer::Offer::metadata
 /// [`Offer::signing_pubkey`]: crate::offers::offer::Offer::signing_pubkey
 #[allow(unused)]
 #[derive(Clone, Copy)]
-pub struct Nonce(pub(crate) [u8; Self::LENGTH]);
+pub(crate) struct Nonce([u8; Self::LENGTH]);
 
 impl Nonce {
 	/// Number of bytes in the nonce.
 	pub const LENGTH: usize = 16;
 
 	/// Creates a `Nonce` from the given [`EntropySource`].
+	#[allow(unused)]
 	pub fn from_entropy_source<ES: EntropySource>(entropy_source: &ES) -> Self {
 		let mut bytes = [0u8; Self::LENGTH];
 		let rand_bytes = entropy_source.get_secure_random_bytes();
 		bytes.copy_from_slice(&rand_bytes[..Self::LENGTH]);
+
 		Nonce(bytes)
 	}
+}
 
-	/// Returns a slice of the underlying bytes of size [`Nonce::LENGTH`].
+/// An encrypted [`Nonce`].
+#[derive(Clone, Copy)]
+pub(crate) struct EncryptedNonce([u8; Self::LENGTH]);
+
+impl EncryptedNonce {
+	/// Number of bytes in the nonce.
+	pub const LENGTH: usize = Nonce::LENGTH;
+
+	/// Returns a slice of the underlying bytes of size [`EncryptedNonce::LENGTH`].
 	pub fn as_slice(&self) -> &[u8] {
 		&self.0
 	}
