@@ -764,7 +764,7 @@ mod tests {
 	use core::time::Duration;
 	use crate::chain::keysinterface::KeyMaterial;
 	use crate::ln::features::OfferFeatures;
-	use crate::ln::inbound_payment::{ExpandedKey, Nonce};
+	use crate::ln::inbound_payment::{EncryptedNonce, ExpandedKey, Nonce};
 	use crate::ln::msgs::{DecodeError, MAX_VALUE_MSAT};
 	use crate::offers::parse::{ParseError, SemanticError};
 	use crate::offers::test_utils::*;
@@ -885,7 +885,9 @@ mod tests {
 		let offer = OfferBuilder::deriving_signing_pubkey(desc, node_id, &expanded_key, nonce)
 			.amount_msats(1000)
 			.build().unwrap();
-		assert_eq!(offer.metadata().unwrap()[..Nonce::LENGTH], nonce.0);
+		let encrypted_nonce =
+			EncryptedNonce::try_from(&offer.metadata().unwrap()[..EncryptedNonce::LENGTH]).unwrap();
+		assert_eq!(encrypted_nonce.decrypt_for_offer(&expanded_key), nonce);
 		assert_eq!(offer.signing_pubkey(), node_id);
 
 		let invoice_request = offer.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
@@ -925,7 +927,8 @@ mod tests {
 			.amount_msats(1000)
 			.path(blinded_path)
 			.build().unwrap();
-		assert_eq!(offer.metadata().unwrap()[..], nonce.0);
+		let encrypted_nonce = EncryptedNonce::try_from(&offer.metadata().unwrap()[..]).unwrap();
+		assert_eq!(encrypted_nonce.decrypt_for_offer(&expanded_key), nonce);
 		assert_ne!(offer.signing_pubkey(), node_id);
 
 		let invoice_request = offer.request_invoice(vec![1; 32], payer_pubkey()).unwrap()

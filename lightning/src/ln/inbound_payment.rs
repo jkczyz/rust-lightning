@@ -24,7 +24,7 @@ use crate::util::crypto::hkdf_extract_expand_4x;
 use crate::util::errors::APIError;
 use crate::util::logger::Logger;
 
-use core::convert::TryInto;
+use core::convert::{TryFrom, TryInto};
 use core::ops::Deref;
 
 const IV_LEN: usize = 16;
@@ -113,8 +113,8 @@ impl ExpandedKey {
 /// [`Offer::metadata`]: crate::offers::offer::Offer::metadata
 /// [`Offer::signing_pubkey`]: crate::offers::offer::Offer::signing_pubkey
 #[allow(unused)]
-#[derive(Clone, Copy)]
-pub(crate) struct Nonce([u8; Self::LENGTH]);
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Nonce(pub(crate) [u8; Self::LENGTH]);
 
 impl Nonce {
 	/// Number of bytes in the nonce.
@@ -133,7 +133,7 @@ impl Nonce {
 
 /// An encrypted [`Nonce`].
 #[derive(Clone, Copy)]
-pub(crate) struct EncryptedNonce([u8; Self::LENGTH]);
+pub(crate) struct EncryptedNonce(pub(crate) [u8; Self::LENGTH]);
 
 impl EncryptedNonce {
 	/// Number of bytes in the nonce.
@@ -142,6 +142,32 @@ impl EncryptedNonce {
 	/// Returns a slice of the underlying bytes of size [`EncryptedNonce::LENGTH`].
 	pub fn as_slice(&self) -> &[u8] {
 		&self.0
+	}
+
+	pub fn decrypt_for_offer(self, expanded_key: &ExpandedKey) -> Nonce {
+		let mut decrypted_bytes = [0u8; EncryptedNonce::LENGTH];
+		let chacha_block =
+			ChaCha20::get_single_block(&expanded_key.offers_base_key, OFFER_IV_BYTES);
+		for i in 0..METADATA_LEN {
+			decrypted_bytes[i] = chacha_block[i] ^ self.0[i];
+		}
+
+		Nonce(decrypted_bytes)
+	}
+}
+
+impl TryFrom<&[u8]> for EncryptedNonce {
+	type Error = ();
+
+	fn try_from(bytes: &[u8]) -> Result<Self, ()> {
+		if bytes.len() != Self::LENGTH {
+			return Err(());
+		}
+
+		let mut encrypted_bytes = [0u8; Self::LENGTH];
+		encrypted_bytes.copy_from_slice(bytes);
+
+		Ok(Self(encrypted_bytes))
 	}
 }
 
