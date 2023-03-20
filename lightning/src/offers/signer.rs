@@ -72,7 +72,7 @@ pub(super) struct MetadataMaterial {
 impl MetadataMaterial {
 	pub fn new(nonce: Nonce, expanded_key: &ExpandedKey) -> Self {
 		Self {
-			nonce: expanded_key.encyrpt_nonce_for_offer(nonce),
+			nonce: expanded_key.encrypt_nonce_for_offer(nonce),
 			hmac: expanded_key.hmac_for_offer(nonce),
 		}
 	}

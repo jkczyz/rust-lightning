@@ -92,7 +92,7 @@ impl ExpandedKey {
 		SecretKey::from_slice(&hash).unwrap().public_key(&secp_ctx)
 	}
 
-	pub(crate) fn encyrpt_nonce_for_offer(&self, nonce: Nonce) -> EncryptedNonce {
+	pub(crate) fn encrypt_nonce_for_offer(&self, nonce: Nonce) -> EncryptedNonce {
 		let iv_bytes: &[u8; IV_LEN] = b"IVoffersIVoffers";
 
 		let mut encrypted_bytes = [0u8; EncryptedNonce::LENGTH];
