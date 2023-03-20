@@ -35,6 +35,8 @@ const AMT_MSAT_LEN: usize = 8;
 // retrieve said payment type bits.
 const METHOD_TYPE_OFFSET: usize = 5;
 
+const OFFER_IV_BYTES: &[u8; IV_LEN] = b"LDKofferLDKoffer";
+
 /// A set of keys that were HKDF-expanded from an initial call to
 /// [`NodeSigner::get_inbound_payment_key_material`].
 ///
@@ -93,10 +95,8 @@ impl ExpandedKey {
 	}
 
 	pub(crate) fn encrypt_nonce_for_offer(&self, nonce: Nonce) -> EncryptedNonce {
-		let iv_bytes: &[u8; IV_LEN] = b"IVoffersIVoffers";
-
 		let mut encrypted_bytes = [0u8; EncryptedNonce::LENGTH];
-		let chacha_block = ChaCha20::get_single_block(&self.offers_base_key, iv_bytes);
+		let chacha_block = ChaCha20::get_single_block(&self.offers_base_key, OFFER_IV_BYTES);
 		for i in 0..METADATA_LEN {
 			encrypted_bytes[i] = chacha_block[i] ^ nonce.0[i];
 		}
