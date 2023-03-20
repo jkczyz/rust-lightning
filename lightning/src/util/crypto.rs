@@ -20,14 +20,6 @@ macro_rules! hkdf_extract_expand {
 		let (k1, k2, _) = hkdf_extract_expand!($salt, $ikm);
 		(k1, k2)
 	}};
-	($salt: expr, $ikm: expr, 3) => {{
-		let (k1, k2, prk) = hkdf_extract_expand!($salt, $ikm);
-
-		let mut hmac = HmacEngine::<Sha256>::new(&prk[..]);
-		hmac.input(&k2);
-		hmac.input(&[3; 1]);
-		(k1, k2, Hmac::from_engine(hmac).into_inner())
-	}};
 	($salt: expr, $ikm: expr, 4) => {{
 		let (k1, k2, prk) = hkdf_extract_expand!($salt, $ikm);
 
