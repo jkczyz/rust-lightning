@@ -22,9 +22,16 @@ use crate::prelude::*;
 /// Message metadata which possibly is derived from [`MetadataMaterial`] such that it can be
 /// verified.
 pub(super) enum Metadata {
+	/// Metadata not set.
 	Empty,
+
+	/// Metadata set to predetermined bytes.
 	Bytes(Vec<u8>),
+
+	/// Metadata to be derived from message contents and given material.
 	Derived(MetadataMaterial),
+
+	/// Metadata and signing pubkey to be derived from message contents and given material.
 	DerivedSigningPubkey(MetadataMaterial),
 }
 
