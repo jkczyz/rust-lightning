@@ -14,7 +14,7 @@ use bitcoin::hashes::hmac::{Hmac, HmacEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use core::convert::TryFrom;
 use core::fmt;
-use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey, self};
 use crate::io;
 use crate::ln::inbound_payment::{EncryptedNonce, ExpandedKey, Nonce};
 use crate::offers::merkle::TlvRecord;
@@ -143,9 +143,9 @@ impl io::Write for MetadataMaterial {
 ///
 /// If the latter is not included in the metadata, the TLV stream is used to check if the given
 /// `signing_pubkey` can be derived from it.
-pub(super) fn verify_metadata<'a>(
+pub(super) fn verify_metadata<'a, T: secp256k1::Signing>(
 	metadata: &Vec<u8>, expanded_key: &ExpandedKey, signing_pubkey: PublicKey,
-	tlv_stream: impl core::iter::Iterator<Item = TlvRecord<'a>>
+	tlv_stream: impl core::iter::Iterator<Item = TlvRecord<'a>>, secp_ctx: &Secp256k1<T>
 ) -> bool {
 	if metadata.len() < EncryptedNonce::LENGTH {
 		return false;
@@ -162,7 +162,6 @@ pub(super) fn verify_metadata<'a>(
 	}
 
 	if metadata.len() == EncryptedNonce::LENGTH {
-		let secp_ctx = Secp256k1::new();
 		let hmac = Hmac::from_engine(hmac);
 		let derived_pubkey = SecretKey::from_slice(hmac.as_inner()).unwrap().public_key(&secp_ctx);
 		signing_pubkey == derived_pubkey

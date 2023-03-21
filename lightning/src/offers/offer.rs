@@ -68,7 +68,7 @@
 
 use bitcoin::blockdata::constants::ChainHash;
 use bitcoin::network::constants::Network;
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::secp256k1::{PublicKey, Secp256k1, self};
 use core::convert::TryFrom;
 use core::num::NonZeroU64;
 use core::str::FromStr;
@@ -548,7 +548,9 @@ impl OfferContents {
 	}
 
 	/// Verifies that the offer metadata was produced from the offer in the TLV stream.
-	pub(super) fn verify(&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey) -> bool {
+	pub(super) fn verify<T: secp256k1::Signing>(
+		&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey, secp_ctx: &Secp256k1<T>
+	) -> bool {
 		match &self.metadata {
 			Some(metadata) => {
 				let tlv_stream = tlv_stream.range(OFFER_TYPES).filter(|record| {
@@ -559,7 +561,7 @@ impl OfferContents {
 						_ => true,
 					}
 				});
-				signer::verify_metadata(metadata, key, self.signing_pubkey(), tlv_stream)
+				signer::verify_metadata(metadata, key, self.signing_pubkey(), tlv_stream, secp_ctx)
 			},
 			None => false,
 		}
@@ -759,6 +761,7 @@ mod tests {
 
 	use bitcoin::blockdata::constants::ChainHash;
 	use bitcoin::network::constants::Network;
+	use bitcoin::secp256k1::Secp256k1;
 	use core::convert::TryFrom;
 	use core::num::NonZeroU64;
 	use core::time::Duration;
@@ -881,6 +884,7 @@ mod tests {
 		let node_id = recipient_pubkey();
 		let expanded_key = ExpandedKey::new(&KeyMaterial([42; 32]));
 		let nonce = Nonce([42; Nonce::LENGTH]);
+		let secp_ctx = Secp256k1::new();
 
 		let offer = OfferBuilder::deriving_signing_pubkey(desc, node_id, &expanded_key, nonce)
 			.amount_msats(1000)
@@ -893,7 +897,7 @@ mod tests {
 		let invoice_request = offer.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
 			.build().unwrap()
 			.sign(payer_sign).unwrap();
-		assert!(invoice_request.verify(&expanded_key));
+		assert!(invoice_request.verify(&expanded_key, &secp_ctx));
 
 		let mut tlv_stream = offer.as_tlv_stream();
 		tlv_stream.amount = Some(100);
@@ -905,7 +909,7 @@ mod tests {
 			.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
 			.build().unwrap()
 			.sign(payer_sign).unwrap();
-		assert!(!invoice_request.verify(&expanded_key));
+		assert!(!invoice_request.verify(&expanded_key, &secp_ctx));
 	}
 
 	#[test]
@@ -914,6 +918,8 @@ mod tests {
 		let node_id = recipient_pubkey();
 		let expanded_key = ExpandedKey::new(&KeyMaterial([42; 32]));
 		let nonce = Nonce([42; Nonce::LENGTH]);
+		let secp_ctx = Secp256k1::new();
+
 		let blinded_path = BlindedPath {
 			introduction_node_id: pubkey(40),
 			blinding_point: pubkey(41),
@@ -934,7 +940,7 @@ mod tests {
 		let invoice_request = offer.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
 			.build().unwrap()
 			.sign(payer_sign).unwrap();
-		assert!(invoice_request.verify(&expanded_key));
+		assert!(invoice_request.verify(&expanded_key, &secp_ctx));
 
 		let mut tlv_stream = offer.as_tlv_stream();
 		tlv_stream.amount = Some(100);
@@ -946,7 +952,7 @@ mod tests {
 			.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
 			.build().unwrap()
 			.sign(payer_sign).unwrap();
-		assert!(!invoice_request.verify(&expanded_key));
+		assert!(!invoice_request.verify(&expanded_key, &secp_ctx));
 
 		let desc = "foo".to_string();
 		match OfferBuilder::deriving_signing_pubkey(desc, node_id, &expanded_key, nonce)

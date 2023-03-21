@@ -54,7 +54,7 @@
 
 use bitcoin::blockdata::constants::ChainHash;
 use bitcoin::network::constants::Network;
-use bitcoin::secp256k1::{Message, PublicKey};
+use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, self};
 use bitcoin::secp256k1::schnorr::Signature;
 use core::convert::TryFrom;
 use crate::io;
@@ -373,8 +373,10 @@ impl InvoiceRequest {
 
 	/// Verifies that the request was for an offer created using the given key.
 	#[allow(unused)]
-	pub(crate) fn verify(&self, key: &ExpandedKey) -> bool {
-		self.contents.offer.verify(TlvStream::new(&self.bytes), key)
+	pub(crate) fn verify<T: secp256k1::Signing>(
+		&self, key: &ExpandedKey, secp_ctx: &Secp256k1<T>
+	) -> bool {
+		self.contents.offer.verify(TlvStream::new(&self.bytes), key, secp_ctx)
 	}
 
 	#[cfg(test)]
