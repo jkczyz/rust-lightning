@@ -190,35 +190,6 @@ impl<'a> InvoiceRequestBuilder<'a> {
 			}
 		}
 
-		// Create the metadata for stateless verification of an Invoice.
-		if let Some(mut metadata_material) = self.metadata.material_mut() {
-			debug_assert!(self.invoice_request.payer.0.is_empty());
-			let mut tlv_stream = self.invoice_request.as_tlv_stream();
-			debug_assert!(tlv_stream.2.payer_id.is_none());
-			tlv_stream.0.metadata = None;
-			tlv_stream.write(&mut metadata_material).unwrap();
-		}
-
-		let (metadata, payer_id) = self.metadata.into_parts();
-		let payer_id = match payer_id {
-			Some(payer_id) => {
-				debug_assert!(self.payer_id.is_none());
-				payer_id
-			},
-			None => {
-				debug_assert!(self.payer_id.is_some());
-				self.payer_id.unwrap()
-			},
-		};
-
-		if let Some(metadata) = metadata {
-			self.invoice_request.payer.0 = metadata;
-		}
-
-		if self.invoice_request.payer.0.is_empty() {
-			return Err(SemanticError::MissingPayerMetadata);
-		}
-
 		let chain = self.invoice_request.chain();
 		if !self.offer.supports_chain(chain) {
 			return Err(SemanticError::UnsupportedChain);
@@ -237,40 +208,16 @@ impl<'a> InvoiceRequestBuilder<'a> {
 			self.invoice_request.amount_msats, self.invoice_request.quantity
 		)?;
 
-		Ok(UnsignedInvoiceRequest {
-			offer: self.offer,
-			invoice_request: InvoiceRequestContents {
-				inner: self.invoice_request,
-				payer_id,
-			},
-		})
-	}
-}
+		let unsigned_invoice_request = self.build_without_checks();
 
-#[cfg(test)]
-impl<'a> InvoiceRequestBuilder<'a> {
-	fn chain_unchecked(mut self, network: Network) -> Self {
-		let chain = ChainHash::using_genesis_block(network);
-		self.invoice_request.chain = Some(chain);
-		self
+		if unsigned_invoice_request.invoice_request.inner.payer.0.is_empty() {
+			return Err(SemanticError::MissingPayerMetadata);
+		}
+
+		Ok(unsigned_invoice_request)
 	}
 
-	fn amount_msats_unchecked(mut self, amount_msats: u64) -> Self {
-		self.invoice_request.amount_msats = Some(amount_msats);
-		self
-	}
-
-	fn features_unchecked(mut self, features: InvoiceRequestFeatures) -> Self {
-		self.invoice_request.features = features;
-		self
-	}
-
-	fn quantity_unchecked(mut self, quantity: u64) -> Self {
-		self.invoice_request.quantity = Some(quantity);
-		self
-	}
-
-	pub(super) fn build_unchecked(mut self) -> UnsignedInvoiceRequest<'a> {
+	fn build_without_checks(mut self) -> UnsignedInvoiceRequest<'a> {
 		// Create the metadata for stateless verification of an Invoice.
 		if let Some(mut metadata_material) = self.metadata.material_mut() {
 			debug_assert!(self.invoice_request.payer.0.is_empty());
@@ -303,6 +250,34 @@ impl<'a> InvoiceRequestBuilder<'a> {
 				payer_id,
 			},
 		}
+	}
+}
+
+#[cfg(test)]
+impl<'a> InvoiceRequestBuilder<'a> {
+	fn chain_unchecked(mut self, network: Network) -> Self {
+		let chain = ChainHash::using_genesis_block(network);
+		self.invoice_request.chain = Some(chain);
+		self
+	}
+
+	fn amount_msats_unchecked(mut self, amount_msats: u64) -> Self {
+		self.invoice_request.amount_msats = Some(amount_msats);
+		self
+	}
+
+	fn features_unchecked(mut self, features: InvoiceRequestFeatures) -> Self {
+		self.invoice_request.features = features;
+		self
+	}
+
+	fn quantity_unchecked(mut self, quantity: u64) -> Self {
+		self.invoice_request.quantity = Some(quantity);
+		self
+	}
+
+	pub(super) fn build_unchecked(self) -> UnsignedInvoiceRequest<'a> {
+		self.build_without_checks()
 	}
 }
 
