@@ -530,7 +530,7 @@ impl InvoiceContents {
 				invoice_request.verify(tlv_stream, key, secp_ctx)
 			},
 			InvoiceContents::ForRefund { refund, .. } => {
-				refund.verify(tlv_stream, key)
+				refund.verify(tlv_stream, key, secp_ctx)
 			},
 		}
 	}

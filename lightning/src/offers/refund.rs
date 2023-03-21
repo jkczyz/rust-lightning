@@ -73,7 +73,7 @@
 
 use bitcoin::blockdata::constants::ChainHash;
 use bitcoin::network::constants::Network;
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::secp256k1::{PublicKey, Secp256k1, self};
 use core::convert::TryFrom;
 use core::str::FromStr;
 use core::time::Duration;
@@ -453,7 +453,9 @@ impl RefundContents {
 	}
 
 	/// Verifies that the payer metadata was produced from the refund in the TLV stream.
-	pub(super) fn verify(&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey) -> bool {
+	pub(super) fn verify<T: secp256k1::Signing>(
+		&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey, secp_ctx: &Secp256k1<T>
+	) -> bool {
 		let offer_records = tlv_stream.clone().range(OFFER_TYPES);
 		let invreq_records = tlv_stream.range(INVOICE_REQUEST_TYPES).filter(|record| {
 			match record.r#type {
@@ -463,7 +465,7 @@ impl RefundContents {
 			}
 		});
 		let tlv_stream = offer_records.chain(invreq_records);
-		signer::verify_metadata(&self.payer.0, key, self.payer_id, tlv_stream)
+		signer::verify_metadata(&self.payer.0, key, self.payer_id, tlv_stream, secp_ctx)
 	}
 
 	pub(super) fn as_tlv_stream(&self) -> RefundTlvStreamRef {
@@ -737,6 +739,7 @@ mod tests {
 		let node_id = payer_pubkey();
 		let expanded_key = ExpandedKey::new(&KeyMaterial([42; 32]));
 		let nonce = Nonce([42; Nonce::LENGTH]);
+		let secp_ctx = Secp256k1::new();
 
 		let refund = RefundBuilder::deriving_payer_id(desc, node_id, &expanded_key, nonce, 1000)
 			.unwrap()
@@ -751,7 +754,7 @@ mod tests {
 			.unwrap()
 			.build().unwrap()
 			.sign(recipient_sign).unwrap();
-		assert!(invoice.verify(&expanded_key));
+		assert!(invoice.verify(&expanded_key, &secp_ctx));
 
 		let mut tlv_stream = refund.as_tlv_stream();
 		tlv_stream.2.amount = Some(2000);
@@ -764,7 +767,7 @@ mod tests {
 			.unwrap()
 			.build().unwrap()
 			.sign(recipient_sign).unwrap();
-		assert!(!invoice.verify(&expanded_key));
+		assert!(!invoice.verify(&expanded_key, &secp_ctx));
 	}
 
 	#[test]
@@ -773,6 +776,8 @@ mod tests {
 		let node_id = payer_pubkey();
 		let expanded_key = ExpandedKey::new(&KeyMaterial([42; 32]));
 		let nonce = Nonce([42; Nonce::LENGTH]);
+		let secp_ctx = Secp256k1::new();
+
 		let blinded_path = BlindedPath {
 			introduction_node_id: pubkey(40),
 			blinding_point: pubkey(41),
@@ -795,7 +800,7 @@ mod tests {
 			.unwrap()
 			.build().unwrap()
 			.sign(recipient_sign).unwrap();
-		assert!(invoice.verify(&expanded_key));
+		assert!(invoice.verify(&expanded_key, &secp_ctx));
 
 		let mut tlv_stream = refund.as_tlv_stream();
 		tlv_stream.2.amount = Some(2000);
@@ -808,7 +813,7 @@ mod tests {
 			.unwrap()
 			.build().unwrap()
 			.sign(recipient_sign).unwrap();
-		assert!(!invoice.verify(&expanded_key));
+		assert!(!invoice.verify(&expanded_key, &secp_ctx));
 	}
 
 	#[test]
