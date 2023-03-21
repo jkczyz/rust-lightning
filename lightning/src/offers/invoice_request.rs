@@ -479,7 +479,9 @@ impl InvoiceRequestContents {
 	}
 
 	/// Verifies that the payer metadata was produced from the invoice request in the TLV stream.
-	pub(super) fn verify(&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey) -> bool {
+	pub(super) fn verify<T: secp256k1::Signing>(
+		&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey, secp_ctx: &Secp256k1<T>
+	) -> bool {
 		let offer_records = tlv_stream.clone().range(OFFER_TYPES);
 		let invreq_records = tlv_stream.range(INVOICE_REQUEST_TYPES).filter(|record| {
 			match record.r#type {
@@ -489,7 +491,7 @@ impl InvoiceRequestContents {
 			}
 		});
 		let tlv_stream = offer_records.chain(invreq_records);
-		signer::verify_metadata(&self.inner.payer.0, key, self.payer_id, tlv_stream)
+		signer::verify_metadata(&self.inner.payer.0, key, self.payer_id, tlv_stream, secp_ctx)
 	}
 
 	pub(super) fn as_tlv_stream(&self) -> PartialInvoiceRequestTlvStreamRef {
@@ -776,6 +778,7 @@ mod tests {
 		let node_id = payer_pubkey();
 		let expanded_key = ExpandedKey::new(&KeyMaterial([42; 32]));
 		let nonce = Nonce([42; Nonce::LENGTH]);
+		let secp_ctx = Secp256k1::new();
 
 		let offer = OfferBuilder::new("foo".into(), recipient_pubkey())
 			.amount_msats(1000)
@@ -794,7 +797,7 @@ mod tests {
 			.unwrap()
 			.build().unwrap()
 			.sign(recipient_sign).unwrap();
-		assert!(invoice.verify(&expanded_key));
+		assert!(invoice.verify(&expanded_key, &secp_ctx));
 
 		let (
 			payer_tlv_stream, offer_tlv_stream, mut invoice_request_tlv_stream,
@@ -817,7 +820,7 @@ mod tests {
 		signature_tlv_stream.write(&mut encoded_invoice).unwrap();
 
 		let invoice = Invoice::try_from(encoded_invoice).unwrap();
-		assert!(!invoice.verify(&expanded_key));
+		assert!(!invoice.verify(&expanded_key, &secp_ctx));
 	}
 
 	#[test]
@@ -845,7 +848,7 @@ mod tests {
 			.unwrap()
 			.build().unwrap()
 			.sign(recipient_sign).unwrap();
-		assert!(invoice.verify(&expanded_key));
+		assert!(invoice.verify(&expanded_key, &secp_ctx));
 
 		let (
 			payer_tlv_stream, offer_tlv_stream, mut invoice_request_tlv_stream,
@@ -868,7 +871,7 @@ mod tests {
 		signature_tlv_stream.write(&mut encoded_invoice).unwrap();
 
 		let invoice = Invoice::try_from(encoded_invoice).unwrap();
-		assert!(!invoice.verify(&expanded_key));
+		assert!(!invoice.verify(&expanded_key, &secp_ctx));
 	}
 
 	#[test]

@@ -97,7 +97,7 @@ use bitcoin::blockdata::constants::ChainHash;
 use bitcoin::hash_types::{WPubkeyHash, WScriptHash};
 use bitcoin::hashes::Hash;
 use bitcoin::network::constants::Network;
-use bitcoin::secp256k1::{Message, PublicKey};
+use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, self};
 use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::util::address::{Address, Payload, WitnessVersion};
 use bitcoin::util::schnorr::TweakedPublicKey;
@@ -472,8 +472,10 @@ impl Invoice {
 
 	/// Verifies that the invoice was for a request or refund created using the given key.
 	#[allow(unused)]
-	pub(crate) fn verify(&self, key: &ExpandedKey) -> bool {
-		self.contents.verify(TlvStream::new(&self.bytes), key)
+	pub(crate) fn verify<T: secp256k1::Signing>(
+		&self, key: &ExpandedKey, secp_ctx: &Secp256k1<T>
+	) -> bool {
+		self.contents.verify(TlvStream::new(&self.bytes), key, secp_ctx)
 	}
 
 	#[cfg(test)]
@@ -520,10 +522,12 @@ impl InvoiceContents {
 		}
 	}
 
-	fn verify(&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey) -> bool {
+	fn verify<T: secp256k1::Signing>(
+		&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey, secp_ctx: &Secp256k1<T>
+	) -> bool {
 		match self {
 			InvoiceContents::ForOffer { invoice_request, .. } => {
-				invoice_request.verify(tlv_stream, key)
+				invoice_request.verify(tlv_stream, key, secp_ctx)
 			},
 			_ => todo!(),
 		}
