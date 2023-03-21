@@ -151,9 +151,10 @@ pub(super) fn verify_metadata<'a>(
 		return false;
 	}
 
-	let nonce = EncryptedNonce::try_from(&metadata[..EncryptedNonce::LENGTH])
-		.unwrap()
-		.decrypt_for_offer(expanded_key);
+	let nonce = match EncryptedNonce::try_from(&metadata[..EncryptedNonce::LENGTH]) {
+		Ok(nonce) => nonce.decrypt_for_offer(expanded_key),
+		Err(_) => return false,
+	};
 	let mut hmac = expanded_key.hmac_for_offer(nonce);
 
 	for record in tlv_stream {
