@@ -448,6 +448,8 @@ impl Offer {
 	///   that it can be used by [`Invoice::verify`] to determine if the invoice was requested using
 	///   a base [`ExpandedKey`] from which the payer id was derived.
 	///
+	/// Useful to protect the sender's privacy.
+	///
 	/// [`Invoice::verify`]: crate::offers::invoice::Invoice::verify
 	/// [`ExpandedKey`]: crate::ln::inbound_payment::ExpandedKey
 	#[allow(unused)]
@@ -461,13 +463,10 @@ impl Offer {
 		Ok(InvoiceRequestBuilder::deriving_payer_id(self, expanded_key, nonce))
 	}
 
-	/// Similar to [`Offer::request_invoice`] except it:
-	/// - sets the [`InvoiceRequest::metadata`] when [`InvoiceRequestBuilder::build`] is called such
-	///   that it can be used by [`Invoice::verify`] to determine if the invoice was requested using
-	///   a base [`ExpandedKey`].
+	/// Similar to [`Offer::request_invoice_deriving_payer_id`] except uses `node_id` for the
+	/// [`InvoiceRequest::payer_id`] instead deriving a different key for each request.
 	///
-	/// [`Invoice::verify`]: crate::offers::invoice::Invoice::verify
-	/// [`ExpandedKey`]: crate::ln::inbound_payment::ExpandedKey
+	/// Useful for when the sender's privacy is not a concern.
 	#[allow(unused)]
 	pub(crate) fn request_invoice_deriving_metadata(
 		&self, node_id: PublicKey, expanded_key: &ExpandedKey, nonce: Nonce
