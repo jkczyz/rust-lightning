@@ -415,8 +415,8 @@ impl Offer {
 		self.contents.signing_pubkey()
 	}
 
-	/// Creates an [`InvoiceRequest`] for the offer with the given `metadata` and `payer_id`, which
-	/// will be reflected in the `Invoice` response.
+	/// Creates an [`InvoiceRequestBuilder`] for the offer with the given `metadata` and `payer_id`,
+	/// which will be reflected in the `Invoice` response.
 	///
 	/// The `metadata` is useful for including information about the derivation of `payer_id` such
 	/// that invoice response handling can be stateless. Also serves as payer-provided entropy while
@@ -426,8 +426,6 @@ impl Offer {
 	/// Otherwise, payments may be correlated.
 	///
 	/// Errors if the offer contains unknown required features.
-	///
-	/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
 	pub fn request_invoice(
 		&self, metadata: Vec<u8>, payer_id: PublicKey
 	) -> Result<InvoiceRequestBuilder, SemanticError> {
