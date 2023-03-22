@@ -93,9 +93,8 @@ impl<'a> InvoiceRequestBuilder<'a> {
 		Self {
 			offer,
 			invoice_request: InvoiceRequestContentsWithoutPayerId {
-				payer: PayerContents(metadata), offer: offer.contents.clone(), chain: None,
-				amount_msats: None, features: InvoiceRequestFeatures::empty(), quantity: None,
-				payer_note: None,
+				payer: PayerContents(metadata),
+				..Self::empty_contents_for_offer(offer)
 			},
 			metadata: Metadata::UserSupplied,
 			payer_id: Some(payer_id),
@@ -108,11 +107,7 @@ impl<'a> InvoiceRequestBuilder<'a> {
 	) -> Self {
 		Self {
 			offer,
-			invoice_request: InvoiceRequestContentsWithoutPayerId {
-				payer: PayerContents(vec![]), offer: offer.contents.clone(), chain: None,
-				amount_msats: None, features: InvoiceRequestFeatures::empty(), quantity: None,
-				payer_note: None,
-			},
+			invoice_request: Self::empty_contents_for_offer(offer),
 			metadata: Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key)),
 			payer_id: None,
 		}
@@ -124,13 +119,17 @@ impl<'a> InvoiceRequestBuilder<'a> {
 	) -> Self {
 		Self {
 			offer,
-			invoice_request: InvoiceRequestContentsWithoutPayerId {
-				payer: PayerContents(vec![]), offer: offer.contents.clone(), chain: None,
-				amount_msats: None, features: InvoiceRequestFeatures::empty(), quantity: None,
-				payer_note: None,
-			},
+			invoice_request: Self::empty_contents_for_offer(offer),
 			metadata: Metadata::Derived(MetadataMaterial::new(nonce, expanded_key)),
 			payer_id: Some(node_id),
+		}
+	}
+
+	fn empty_contents_for_offer(offer: &Offer) -> InvoiceRequestContentsWithoutPayerId {
+		let offer = offer.contents.clone();
+		InvoiceRequestContentsWithoutPayerId {
+			payer: PayerContents(vec![]), offer, chain: None, amount_msats: None,
+			features: InvoiceRequestFeatures::empty(), quantity: None, payer_note: None,
 		}
 	}
 
