@@ -22,11 +22,8 @@ use crate::prelude::*;
 /// Message metadata which possibly is derived from [`MetadataMaterial`] such that it can be
 /// verified.
 pub(super) enum Metadata {
-	/// Metadata not set.
-	Empty,
-
-	/// Metadata set to predetermined bytes.
-	Bytes(Vec<u8>),
+	/// Metadata to be supplied by the user.
+	UserSupplied,
 
 	/// Metadata to be derived from message contents and given material.
 	Derived(MetadataMaterial),
@@ -38,8 +35,7 @@ pub(super) enum Metadata {
 impl Metadata {
 	pub fn material(&self) -> Option<&MetadataMaterial> {
 		match self {
-			Metadata::Empty => None,
-			Metadata::Bytes(_) => None,
+			Metadata::UserSupplied => None,
 			Metadata::Derived(material) => Some(material),
 			Metadata::DerivedSigningPubkey(material) => Some(material),
 		}
@@ -47,8 +43,7 @@ impl Metadata {
 
 	pub fn material_mut(&mut self) -> Option<&mut MetadataMaterial> {
 		match self {
-			Metadata::Empty => None,
-			Metadata::Bytes(_) => None,
+			Metadata::UserSupplied => None,
 			Metadata::Derived(material) => Some(material),
 			Metadata::DerivedSigningPubkey(material) => Some(material),
 		}
@@ -56,8 +51,7 @@ impl Metadata {
 
 	pub fn into_parts(self) -> (Option<Vec<u8>>, Option<PublicKey>) {
 		match self {
-			Metadata::Empty => (None, None),
-			Metadata::Bytes(metadata) => (Some(metadata), None),
+			Metadata::UserSupplied => (None, None),
 			Metadata::Derived(metadata_material) => (Some(metadata_material.into_metadata()), None),
 			Metadata::DerivedSigningPubkey(metadata_material) => {
 				let (metadata, pubkey) = metadata_material.into_parts();

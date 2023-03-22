@@ -112,7 +112,7 @@ impl OfferBuilder {
 				features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
 				supported_quantity: Quantity::One, signing_pubkey,
 			},
-			metadata: Metadata::Empty,
+			metadata: Metadata::UserSupplied,
 		}
 	}
 
@@ -165,7 +165,7 @@ impl OfferBuilder {
 			return Err(SemanticError::UnexpectedMetadata);
 		}
 
-		self.metadata = Metadata::Bytes(metadata);
+		self.offer.metadata = Some(metadata);
 		Ok(self)
 	}
 
