@@ -97,7 +97,7 @@ impl<'a> InvoiceRequestBuilder<'a> {
 				amount_msats: None, features: InvoiceRequestFeatures::empty(), quantity: None,
 				payer_note: None,
 			},
-			metadata: Metadata::Empty,
+			metadata: Metadata::UserSupplied,
 			payer_id: Some(payer_id),
 		}
 	}
