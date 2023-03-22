@@ -131,10 +131,10 @@ impl RefundBuilder {
 		})
 	}
 
-	/// Similar to [`RefundBuilder::new`] except, if [`RefundBuilder::path`] is not called, the
-	/// payer id is derived from the given [`ExpandedKey`] and nonce. This provides sender privacy
-	/// by using a different payer id for each refund, assuming a different nonce is used.
-	/// Otherwise, the provided `node_id` is used for the payer id.
+	/// Similar to [`RefundBuilder::new`] except, if [`RefundBuilder::path`] is called, the payer id
+	/// is derived from the given [`ExpandedKey`] and nonce. This provides sender privacy by using a
+	/// different payer id for each refund, assuming a different nonce is used.  Otherwise, the
+	/// provided `node_id` is used for the payer id.
 	///
 	/// Also, sets the metadata when [`RefundBuilder::build`] is called such that it can be used to
 	/// verify that an [`InvoiceRequest`] was produced for the refund given an [`ExpandedKey`].
