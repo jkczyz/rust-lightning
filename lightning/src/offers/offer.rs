@@ -116,10 +116,10 @@ impl OfferBuilder {
 		}
 	}
 
-	/// Similar to [`OfferBuilder::new`] except, if [`OfferBuilder::path`] is not called, the
-	/// signing pubkey is derived from the given [`ExpandedKey`] and nonce. This provides recipient
-	/// privacy by using a different signing pubkey for each offer, assuming a different nonce is
-	/// used. Otherwise, the provided `node_id` is used for the signing pubkey.
+	/// Similar to [`OfferBuilder::new`] except, if [`OfferBuilder::path`] is called, the signing
+	/// pubkey is derived from the given [`ExpandedKey`] and nonce. This provides recipient privacy
+	/// by using a different signing pubkey for each offer, assuming a different nonce is used.
+	/// Otherwise, the provided `node_id` is used for the signing pubkey.
 	///
 	/// Also, sets the metadata when [`OfferBuilder::build`] is called such that it can be used to
 	/// verify that an [`InvoiceRequest`] was produced for the offer given an [`ExpandedKey`].
