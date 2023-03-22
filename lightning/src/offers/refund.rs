@@ -127,7 +127,7 @@ impl RefundBuilder {
 				paths: None, chain: None, amount_msats, features: InvoiceRequestFeatures::empty(),
 				quantity: None, payer_id, payer_note: None,
 			},
-			metadata: Metadata::Empty,
+			metadata: Metadata::UserSupplied,
 		})
 	}
 
