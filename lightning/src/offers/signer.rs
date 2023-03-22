@@ -138,8 +138,8 @@ impl io::Write for MetadataMaterial {
 }
 
 /// Verifies data given in a TLV stream was used to produce the given metadata, consisting of:
-/// - a 128-bit [`Nonce`] and possibly
-/// - a [`Sha256Hash`] of the nonce and the TLV records using the [`ExpandedKey`].
+/// - a 128-bit [`EncryptedNonce`] and possibly
+/// - a [`Sha256Hash`] of the unencrypted nonce and the TLV records using the [`ExpandedKey`].
 ///
 /// If the latter is not included in the metadata, the TLV stream is used to check if the given
 /// `signing_pubkey` can be derived from it.
