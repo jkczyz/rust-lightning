@@ -13,6 +13,7 @@ use bitcoin::hashes::{Hash, HashEngine};
 use bitcoin::hashes::hmac::{Hmac, HmacEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use core::convert::TryInto;
+use core::fmt;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use crate::io;
 use crate::ln::inbound_payment::{EncryptedNonce, ExpandedKey, Nonce};
@@ -21,9 +22,10 @@ use crate::prelude::*;
 
 /// Message metadata which possibly is derived from [`MetadataMaterial`] such that it can be
 /// verified.
+#[derive(Clone)]
 pub(super) enum Metadata {
-	/// Metadata to be supplied by the user.
-	UserSupplied,
+	/// Metadata as parsed, supplied by the user, or derived.
+	Bytes(Vec<u8>),
 
 	/// Metadata to be derived from message contents and given material.
 	Derived(MetadataMaterial),
@@ -33,9 +35,17 @@ pub(super) enum Metadata {
 }
 
 impl Metadata {
+	pub fn as_bytes(&self) -> Option<&Vec<u8>> {
+		match self {
+			Metadata::Bytes(bytes) => Some(bytes),
+			Metadata::Derived(material) => None,
+			Metadata::DerivedSigningPubkey(material) => None,
+		}
+	}
+
 	pub fn material(&self) -> Option<&MetadataMaterial> {
 		match self {
-			Metadata::UserSupplied => None,
+			Metadata::Bytes(_) => None,
 			Metadata::Derived(material) => Some(material),
 			Metadata::DerivedSigningPubkey(material) => Some(material),
 		}
@@ -43,7 +53,7 @@ impl Metadata {
 
 	pub fn material_mut(&mut self) -> Option<&mut MetadataMaterial> {
 		match self {
-			Metadata::UserSupplied => None,
+			Metadata::Bytes(_) => None,
 			Metadata::Derived(material) => Some(material),
 			Metadata::DerivedSigningPubkey(material) => Some(material),
 		}
@@ -51,12 +61,36 @@ impl Metadata {
 
 	pub fn into_parts(self) -> (Option<Vec<u8>>, Option<PublicKey>) {
 		match self {
-			Metadata::UserSupplied => (None, None),
+			Metadata::Bytes(bytes) => (Some(bytes), None),
 			Metadata::Derived(metadata_material) => (Some(metadata_material.into_metadata()), None),
 			Metadata::DerivedSigningPubkey(metadata_material) => {
 				let (metadata, pubkey) = metadata_material.into_parts();
 				(Some(metadata), Some(pubkey))
 			},
+		}
+	}
+}
+
+impl fmt::Debug for Metadata {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Metadata::Bytes(bytes) => bytes.fmt(f),
+			Metadata::Derived(material) => f.write_str("Derived"),
+			Metadata::DerivedSigningPubkey(material) => f.write_str("DerivedSigningPubkey"),
+		}
+	}
+}
+
+impl PartialEq for Metadata {
+	fn eq(&self, other: &Self) -> bool {
+		match self {
+			Metadata::Bytes(bytes) => if let Metadata::Bytes(other_bytes) = other {
+				bytes == other_bytes
+			} else {
+				false
+			},
+			Metadata::Derived(material) => false,
+			Metadata::DerivedSigningPubkey(material) => false,
 		}
 	}
 }

@@ -96,7 +96,6 @@ use std::time::SystemTime;
 /// [module-level documentation]: self
 pub struct OfferBuilder {
 	offer: OfferContents,
-	metadata: Metadata,
 }
 
 impl OfferBuilder {
@@ -111,8 +110,7 @@ impl OfferBuilder {
 				chains: None, metadata: None, amount: None, description,
 				features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
 				supported_quantity: Quantity::One, signing_pubkey,
-			},
-			metadata: Metadata::UserSupplied,
+			}
 		}
 	}
 
@@ -130,13 +128,13 @@ impl OfferBuilder {
 	pub(crate) fn deriving_signing_pubkey(
 		description: String, node_id: PublicKey, expanded_key: &ExpandedKey, nonce: Nonce
 	) -> Self {
+		let metadata = Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key));
 		OfferBuilder {
 			offer: OfferContents {
-				chains: None, metadata: None, amount: None, description,
+				chains: None, metadata: Some(metadata), amount: None, description,
 				features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
 				supported_quantity: Quantity::One, signing_pubkey: node_id,
-			},
-			metadata: Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key)),
+			}
 		}
 	}
 
@@ -161,11 +159,11 @@ impl OfferBuilder {
 	/// Successive calls to this method will override the previous setting. Errors if the builder
 	/// was constructed using a derived pubkey.
 	pub fn metadata(mut self, metadata: Vec<u8>) -> Result<Self, SemanticError> {
-		if self.metadata.material().is_some() {
+		if self.offer.metadata.map(|metadata| metadata.material().is_some()).unwrap_or(false) {
 			return Err(SemanticError::UnexpectedMetadata);
 		}
 
-		self.offer.metadata = Some(metadata);
+		self.offer.metadata = Some(Metadata::Bytes(metadata));
 		Ok(self)
 	}
 
@@ -243,25 +241,32 @@ impl OfferBuilder {
 
 	fn build_without_checks(mut self) -> Offer {
 		// Create the metadata for stateless verification of an InvoiceRequest.
-		if let Some(metadata_material) = self.metadata.material_mut() {
-			let mut tlv_stream = self.offer.as_tlv_stream();
-			tlv_stream.metadata = None;
-			tlv_stream.node_id = None;
-			tlv_stream.write(metadata_material).unwrap();
+		let mut metadata = self.offer.metadata.take();
+		if let Some(metadata) = &mut metadata {
+			if let Some(metadata_material) = metadata.material_mut() {
+				let mut tlv_stream = self.offer.as_tlv_stream();
+				debug_assert_eq!(tlv_stream.metadata, None);
 
-			if self.offer.paths.is_none() {
-				self.metadata = Metadata::Derived(metadata_material.clone());
+				tlv_stream.metadata = None;
+				tlv_stream.node_id = None;
+				tlv_stream.write(metadata_material).unwrap();
+
+				if self.offer.paths.is_none() {
+					*metadata = Metadata::Derived(metadata_material.clone());
+				}
 			}
 		}
 
-		let (metadata, signing_pubkey) = self.metadata.into_parts();
-
 		if let Some(metadata) = metadata {
-			self.offer.metadata = Some(metadata);
-		}
+			let (metadata_bytes, signing_pubkey) = metadata.into_parts();
 
-		if let Some(signing_pubkey) = signing_pubkey {
-			self.offer.signing_pubkey = signing_pubkey;
+			if let Some(metadata_bytes) = metadata_bytes {
+				self.offer.metadata = Some(Metadata::Bytes(metadata_bytes));
+			}
+
+			if let Some(signing_pubkey) = signing_pubkey {
+				self.offer.signing_pubkey = signing_pubkey;
+			}
 		}
 
 		let mut bytes = Vec::new();
@@ -311,7 +316,7 @@ pub struct Offer {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct OfferContents {
 	chains: Option<Vec<ChainHash>>,
-	metadata: Option<Vec<u8>>,
+	metadata: Option<Metadata>,
 	amount: Option<Amount>,
 	description: String,
 	features: OfferFeatures,
@@ -346,7 +351,7 @@ impl Offer {
 	/// Opaque bytes set by the originator. Useful for authentication and validating fields since it
 	/// is reflected in `invoice_request` messages along with all the other fields from the `offer`.
 	pub fn metadata(&self) -> Option<&Vec<u8>> {
-		self.contents.metadata.as_ref()
+		self.contents.metadata()
 	}
 
 	/// The minimum amount required for a successful payment of a single item.
@@ -460,6 +465,10 @@ impl OfferContents {
 		self.chains().contains(&chain)
 	}
 
+	pub fn metadata(&self) -> Option<&Vec<u8>> {
+		self.metadata.as_ref().and_then(|metadata| metadata.as_bytes())
+	}
+
 	#[cfg(feature = "std")]
 	pub(super) fn is_expired(&self) -> bool {
 		match self.absolute_expiry {
@@ -552,7 +561,7 @@ impl OfferContents {
 
 		OfferTlvStreamRef {
 			chains: self.chains.as_ref(),
-			metadata: self.metadata.as_ref(),
+			metadata: self.metadata(),
 			currency,
 			amount,
 			description: Some(&self.description),
@@ -669,6 +678,8 @@ impl TryFrom<OfferTlvStream> for OfferContents {
 			chains, metadata, currency, amount, description, features, absolute_expiry, paths,
 			issuer, quantity_max, node_id,
 		} = tlv_stream;
+
+		let metadata = metadata.map(|metadata| Metadata::Bytes(metadata));
 
 		let amount = match (currency, amount) {
 			(None, None) => None,
