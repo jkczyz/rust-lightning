@@ -260,10 +260,7 @@ impl OfferBuilder {
 
 		if let Some(metadata) = metadata {
 			let (metadata_bytes, signing_pubkey) = metadata.into_parts();
-
-			if let Some(metadata_bytes) = metadata_bytes {
-				self.offer.metadata = Some(Metadata::Bytes(metadata_bytes));
-			}
+			self.offer.metadata = Some(Metadata::Bytes(metadata_bytes));
 
 			if let Some(signing_pubkey) = signing_pubkey {
 				self.offer.signing_pubkey = signing_pubkey;

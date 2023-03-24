@@ -60,13 +60,13 @@ impl Metadata {
 		}
 	}
 
-	pub fn into_parts(self) -> (Option<Vec<u8>>, Option<PublicKey>) {
+	pub fn into_parts(self) -> (Vec<u8>, Option<PublicKey>) {
 		match self {
-			Metadata::Bytes(bytes) => (Some(bytes), None),
-			Metadata::Derived(metadata_material) => (Some(metadata_material.into_metadata()), None),
+			Metadata::Bytes(bytes) => (bytes, None),
+			Metadata::Derived(metadata_material) => (metadata_material.into_metadata(), None),
 			Metadata::DerivedSigningPubkey(metadata_material) => {
 				let (metadata, pubkey) = metadata_material.into_parts();
-				(Some(metadata), Some(pubkey))
+				(metadata, Some(pubkey))
 			},
 		}
 	}
