@@ -104,7 +104,6 @@ use std::time::SystemTime;
 /// [module-level documentation]: self
 pub struct RefundBuilder {
 	refund: RefundContents,
-	metadata: Metadata,
 }
 
 impl RefundBuilder {
@@ -126,8 +125,7 @@ impl RefundBuilder {
 				payer: PayerContents(metadata), description, absolute_expiry: None, issuer: None,
 				paths: None, chain: None, amount_msats, features: InvoiceRequestFeatures::empty(),
 				quantity: None, payer_id, payer_note: None,
-			},
-			metadata: Metadata::UserSupplied,
+			}
 		})
 	}
 
@@ -150,13 +148,13 @@ impl RefundBuilder {
 			return Err(SemanticError::InvalidAmount);
 		}
 
+		let metadata = Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key));
 		Ok(Self {
 			refund: RefundContents {
-				payer: PayerContents(vec![]), description, absolute_expiry: None, issuer: None,
+				payer: PayerContents(metadata), description, absolute_expiry: None, issuer: None,
 				paths: None, chain: None, amount_msats, features: InvoiceRequestFeatures::empty(),
 				quantity: None, payer_id: node_id, payer_note: None,
-			},
-			metadata: Metadata::DerivedSigningPubkey(MetadataMaterial::new(nonce, expanded_key)),
+			}
 		})
 	}
 
@@ -225,27 +223,27 @@ impl RefundBuilder {
 		}
 
 		// Create the metadata for stateless verification of an Invoice.
-		if let Some(mut metadata_material) = self.metadata.material_mut() {
-			debug_assert!(self.refund.payer.0.is_empty());
+		if self.refund.payer.0.material().is_some() {
+			let mut metadata = self.refund.payer.0.clone();
+			let mut metadata_material = metadata.material_mut().unwrap();
+
 			let mut tlv_stream = self.refund.as_tlv_stream();
 			tlv_stream.0.metadata = None;
 			tlv_stream.2.payer_id = None;
 			tlv_stream.write(&mut metadata_material).unwrap();
 
 			if self.refund.paths.is_none() {
-				self.metadata = Metadata::Derived(metadata_material.clone());
+				metadata = Metadata::Derived(metadata_material.clone());
 			}
-		}
 
-		let (metadata, keys) = self.metadata.into_parts();
-
-		if let Some(metadata) = metadata {
 			self.refund.payer.0 = metadata;
 		}
 
+		let (metadata, keys) = self.refund.payer.0.into_parts();
 		if let Some(keys) = keys {
 			self.refund.payer_id = keys.public_key();
 		}
+		self.refund.payer.0 = Metadata::Bytes(metadata);
 
 		let mut bytes = Vec::new();
 		self.refund.write(&mut bytes).unwrap();
@@ -333,7 +331,7 @@ impl Refund {
 	///
 	/// [`payer_id`]: Self::payer_id
 	pub fn metadata(&self) -> &[u8] {
-		&self.contents.payer.0.as_bytes().unwrap()[..]
+		self.contents.payer.0.as_bytes().map(|bytes| bytes.as_slice()).unwrap_or(&[])
 	}
 
 	/// A chain that the refund is valid for.
