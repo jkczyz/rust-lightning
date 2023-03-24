@@ -551,7 +551,7 @@ impl OfferContents {
 	pub(super) fn verify<T: secp256k1::Signing>(
 		&self, tlv_stream: TlvStream<'_>, key: &ExpandedKey, secp_ctx: &Secp256k1<T>
 	) -> bool {
-		match &self.metadata {
+		match self.metadata() {
 			Some(metadata) => {
 				let tlv_stream = tlv_stream.range(OFFER_TYPES).filter(|record| {
 					match record.r#type {
