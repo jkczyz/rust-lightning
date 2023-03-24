@@ -332,7 +332,7 @@ impl Refund {
 	///
 	/// [`payer_id`]: Self::payer_id
 	pub fn metadata(&self) -> &[u8] {
-		self.contents.payer.0.as_bytes().map(|bytes| bytes.as_slice()).unwrap_or(&[])
+		self.contents.metadata()
 	}
 
 	/// A chain that the refund is valid for.
@@ -444,6 +444,10 @@ impl RefundContents {
 		}
 	}
 
+	fn metadata(&self) -> &[u8] {
+		self.payer.0.as_bytes().map(|bytes| bytes.as_slice()).unwrap_or(&[])
+	}
+
 	pub(super) fn chain(&self) -> ChainHash {
 		self.chain.unwrap_or_else(|| self.implied_chain())
 	}
@@ -465,7 +469,7 @@ impl RefundContents {
 			}
 		});
 		let tlv_stream = offer_records.chain(invreq_records);
-		signer::verify_metadata(&self.payer.0, key, self.payer_id, tlv_stream, secp_ctx)
+		signer::verify_metadata(self.metadata(), key, self.payer_id, tlv_stream, secp_ctx)
 	}
 
 	pub(super) fn as_tlv_stream(&self) -> RefundTlvStreamRef {
