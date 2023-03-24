@@ -753,6 +753,7 @@ mod tests {
 		assert_eq!(encrypted_nonce.decrypt_for_offer(&expanded_key), nonce);
 		assert_eq!(refund.payer_id(), node_id);
 
+		// Fails verification with altered fields
 		let invoice = refund
 			.respond_with_no_std(payment_paths(), payment_hash(), recipient_pubkey(), now())
 			.unwrap()
@@ -762,6 +763,21 @@ mod tests {
 
 		let mut tlv_stream = refund.as_tlv_stream();
 		tlv_stream.2.amount = Some(2000);
+
+		let mut encoded_refund = Vec::new();
+		tlv_stream.write(&mut encoded_refund).unwrap();
+
+		let invoice = Refund::try_from(encoded_refund).unwrap()
+			.respond_with_no_std(payment_paths(), payment_hash(), recipient_pubkey(), now())
+			.unwrap()
+			.build().unwrap()
+			.sign(recipient_sign).unwrap();
+		assert!(!invoice.verify(&expanded_key, &secp_ctx));
+
+		// Fails verification with altered metadata
+		let mut tlv_stream = refund.as_tlv_stream();
+		let metadata = tlv_stream.0.metadata.unwrap().iter().copied().rev().collect();
+		tlv_stream.0.metadata = Some(&metadata);
 
 		let mut encoded_refund = Vec::new();
 		tlv_stream.write(&mut encoded_refund).unwrap();
@@ -806,8 +822,24 @@ mod tests {
 			.sign(recipient_sign).unwrap();
 		assert!(invoice.verify(&expanded_key, &secp_ctx));
 
+		// Fails verification with altered fields
 		let mut tlv_stream = refund.as_tlv_stream();
 		tlv_stream.2.amount = Some(2000);
+
+		let mut encoded_refund = Vec::new();
+		tlv_stream.write(&mut encoded_refund).unwrap();
+
+		let invoice = Refund::try_from(encoded_refund).unwrap()
+			.respond_with_no_std(payment_paths(), payment_hash(), recipient_pubkey(), now())
+			.unwrap()
+			.build().unwrap()
+			.sign(recipient_sign).unwrap();
+		assert!(!invoice.verify(&expanded_key, &secp_ctx));
+
+		// Fails verification with altered payer_id
+		let mut tlv_stream = refund.as_tlv_stream();
+		let payer_id = pubkey(1);
+		tlv_stream.2.payer_id = Some(&payer_id);
 
 		let mut encoded_refund = Vec::new();
 		tlv_stream.write(&mut encoded_refund).unwrap();
