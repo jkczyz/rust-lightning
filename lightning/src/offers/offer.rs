@@ -899,8 +899,23 @@ mod tests {
 			.sign(payer_sign).unwrap();
 		assert!(invoice_request.verify(&expanded_key, &secp_ctx));
 
+		// Fails verification with altered offer field
 		let mut tlv_stream = offer.as_tlv_stream();
 		tlv_stream.amount = Some(100);
+
+		let mut encoded_offer = Vec::new();
+		tlv_stream.write(&mut encoded_offer).unwrap();
+
+		let invoice_request = Offer::try_from(encoded_offer).unwrap()
+			.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
+			.build().unwrap()
+			.sign(payer_sign).unwrap();
+		assert!(!invoice_request.verify(&expanded_key, &secp_ctx));
+
+		// Fails verification with altered metadata
+		let mut tlv_stream = offer.as_tlv_stream();
+		let metadata = tlv_stream.metadata.unwrap().iter().copied().rev().collect();
+		tlv_stream.metadata = Some(&metadata);
 
 		let mut encoded_offer = Vec::new();
 		tlv_stream.write(&mut encoded_offer).unwrap();
@@ -942,6 +957,7 @@ mod tests {
 			.sign(payer_sign).unwrap();
 		assert!(invoice_request.verify(&expanded_key, &secp_ctx));
 
+		// Fails verification with altered offer field
 		let mut tlv_stream = offer.as_tlv_stream();
 		tlv_stream.amount = Some(100);
 
@@ -954,6 +970,21 @@ mod tests {
 			.sign(payer_sign).unwrap();
 		assert!(!invoice_request.verify(&expanded_key, &secp_ctx));
 
+		// Fails verification with altered signing pubkey
+		let mut tlv_stream = offer.as_tlv_stream();
+		let signing_pubkey = pubkey(1);
+		tlv_stream.node_id = Some(&signing_pubkey);
+
+		let mut encoded_offer = Vec::new();
+		tlv_stream.write(&mut encoded_offer).unwrap();
+
+		let invoice_request = Offer::try_from(encoded_offer).unwrap()
+			.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
+			.build().unwrap()
+			.sign(payer_sign).unwrap();
+		assert!(!invoice_request.verify(&expanded_key, &secp_ctx));
+
+		// Fails adding metadata when it will be derived
 		let desc = "foo".to_string();
 		match OfferBuilder::deriving_signing_pubkey(desc, node_id, &expanded_key, nonce)
 			.metadata(vec![1; 32])
