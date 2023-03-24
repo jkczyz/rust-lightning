@@ -491,7 +491,7 @@ impl InvoiceRequestContents {
 			}
 		});
 		let tlv_stream = offer_records.chain(invreq_records);
-		signer::verify_metadata(&self.inner.payer.0, key, self.payer_id, tlv_stream, secp_ctx)
+		signer::verify_metadata(self.metadata(), key, self.payer_id, tlv_stream, secp_ctx)
 	}
 
 	pub(super) fn as_tlv_stream(&self) -> PartialInvoiceRequestTlvStreamRef {

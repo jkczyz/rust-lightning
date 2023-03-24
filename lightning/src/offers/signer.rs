@@ -145,7 +145,7 @@ impl io::Write for MetadataMaterial {
 /// If the latter is not included in the metadata, the TLV stream is used to check if the given
 /// `signing_pubkey` can be derived from it.
 pub(super) fn verify_metadata<'a, T: secp256k1::Signing>(
-	metadata: &Vec<u8>, expanded_key: &ExpandedKey, signing_pubkey: PublicKey,
+	metadata: &[u8], expanded_key: &ExpandedKey, signing_pubkey: PublicKey,
 	tlv_stream: impl core::iter::Iterator<Item = TlvRecord<'a>>, secp_ctx: &Secp256k1<T>
 ) -> bool {
 	if metadata.len() < EncryptedNonce::LENGTH {
