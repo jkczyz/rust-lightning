@@ -193,6 +193,10 @@ pub enum SemanticError {
 	MissingPaymentHash,
 	/// A signature was expected but was missing.
 	MissingSignature,
+	/// An error message was expected but was missing.
+	MissingErrorMessage,
+	/// An erroneous field was expected but was missing.
+	MissingErroneousField,
 }
 
 impl From<bech32::Error> for ParseError {
