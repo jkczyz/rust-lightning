@@ -13,6 +13,7 @@ use core::convert::TryFrom;
 use crate::io;
 use crate::offers::parse::{ParseError, ParsedMessage, SemanticError};
 use crate::util::ser::{HighZeroBytesDroppedBigSize, WithoutLength, Writeable, Writer};
+use crate::util::string::PrintableString;
 
 use crate::prelude::*;
 
@@ -48,8 +49,8 @@ impl InvoiceError {
 	}
 
 	/// An explanation of the error.
-	pub fn message(&self) -> &str {
-		&self.message
+	pub fn message(&self) -> PrintableString {
+		PrintableString(&self.message)
 	}
 
 	pub(super) fn as_tlv_stream(&self) -> InvoiceErrorTlvStreamRef {
@@ -63,7 +64,7 @@ impl InvoiceError {
 
 impl core::fmt::Display for InvoiceError {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
-		f.write_str(self.message())
+		self.message().fmt(f)
 	}
 }
 
@@ -122,6 +123,7 @@ mod tests {
 	use core::convert::TryFrom;
 	use crate::offers::parse::{ParseError, SemanticError};
 	use crate::util::ser::Writeable;
+	use crate::util::string::PrintableString;
 
 	#[test]
 	fn parses_invoice_error_without_erroneous_field() {
@@ -137,7 +139,7 @@ mod tests {
 
 		match InvoiceError::try_from(buffer) {
 			Ok(invoice_error) => {
-				assert_eq!(invoice_error.message(), "Invalid value");
+				assert_eq!(invoice_error.message(), PrintableString("Invalid value"));
 				assert_eq!(invoice_error.erroneous_field(), None);
 				assert_eq!(invoice_error.as_tlv_stream(), tlv_stream);
 			}
@@ -160,7 +162,7 @@ mod tests {
 
 		match InvoiceError::try_from(buffer) {
 			Ok(invoice_error) => {
-				assert_eq!(invoice_error.message(), "Invalid value");
+				assert_eq!(invoice_error.message(), PrintableString("Invalid value"));
 				assert_eq!(
 					invoice_error.erroneous_field(),
 					Some(&ErroneousField {
@@ -188,7 +190,7 @@ mod tests {
 
 		match InvoiceError::try_from(buffer) {
 			Ok(invoice_error) => {
-				assert_eq!(invoice_error.message(), "Invalid value");
+				assert_eq!(invoice_error.message(), PrintableString("Invalid value"));
 				assert_eq!(
 					invoice_error.erroneous_field(),
 					Some(&ErroneousField { tlv_fieldnum: 42, suggested_value: None }),
