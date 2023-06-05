@@ -9,10 +9,10 @@
 
 //! Data structures and encoding for `invoice_error` messages.
 
-use core::convert::TryFrom;
 use crate::io;
-use crate::offers::parse::{ParseError, ParsedMessage, SemanticError};
-use crate::util::ser::{HighZeroBytesDroppedBigSize, WithoutLength, Writeable, Writer};
+use crate::ln::msgs::DecodeError;
+use crate::offers::parse::SemanticError;
+use crate::util::ser::{HighZeroBytesDroppedBigSize, Readable, WithoutLength, Writeable, Writer};
 use crate::util::string::UntrustedString;
 
 use crate::prelude::*;
@@ -48,16 +48,6 @@ pub struct ErroneousField {
 	pub suggested_value: Option<Vec<u8>>,
 }
 
-impl InvoiceError {
-	pub(super) fn as_tlv_stream(&self) -> InvoiceErrorTlvStreamRef {
-		InvoiceErrorTlvStreamRef {
-			erroneous_field: self.erroneous_field.as_ref().map(|f| f.tlv_fieldnum),
-			suggested_value: self.erroneous_field.as_ref().and_then(|f| f.suggested_value.as_ref()),
-			error: Some(&self.message),
-		}
-	}
-}
-
 impl core::fmt::Display for InvoiceError {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
 		self.message.fmt(f)
@@ -66,37 +56,36 @@ impl core::fmt::Display for InvoiceError {
 
 impl Writeable for InvoiceError {
 	fn write<W: Writer>(&self, writer: &mut W) -> Result<(), io::Error> {
-		self.as_tlv_stream().write(writer)
+		write_tlv_fields!(writer, {
+			(1, self.erroneous_field.tlv_fieldnum, (option, encoding: (u64, HighZeroBytesDroppedBigSize))),
+			(3, self.erroneous_field.suggested_value, (option, encoding: (Vec<u8>, WithoutLength))),
+			(5, WithoutLength(self.message), required),
+		});
 	}
 }
 
-tlv_stream!(InvoiceErrorTlvStream, InvoiceErrorTlvStreamRef, 0..=u64::MAX, {
-	(1, erroneous_field: (u64, HighZeroBytesDroppedBigSize)),
-	(3, suggested_value: (Vec<u8>, WithoutLength)),
-	(5, error: (UntrustedString, WithoutLength)),
-});
-
-impl TryFrom<Vec<u8>> for InvoiceError {
-	type Error = ParseError;
-
-	fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-		let invoice_error = ParsedMessage::<InvoiceErrorTlvStream>::try_from(bytes)?;
-		let ParsedMessage { tlv_stream, .. } = invoice_error;
-		let InvoiceErrorTlvStream { erroneous_field, suggested_value, error } = tlv_stream;
+impl Readable for InvoiceError {
+	fn read<R: io::Read>(reader: &mut R) -> Result<Self, DecodeError> {
+		let mut erroneous_field = None;
+		let mut suggested_value = None;
+		let mut error = None;
+		read_tlv_fields!(reader, {
+			(1, erroneous_field, (option, encoding: (u64, HighZeroBytesDroppedBigSize))),
+			(3, suggested_value, (option, encoding: (Vec<u8>, WithoutLength))),
+			(5, error, (option, encoding: (UntrustedString, WithoutLength))),
+		});
 
 		let erroneous_field = match (erroneous_field, suggested_value) {
 			(None, None) => None,
-			(None, Some(_)) => {
-				return Err(ParseError::InvalidSemantics(SemanticError::MissingErroneousField));
-			},
+			(None, Some(_)) => return Err(DecodeError::InvalidValue),
 			(Some(tlv_fieldnum), suggested_value) => {
 				Some(ErroneousField { tlv_fieldnum, suggested_value })
 			},
 		};
 
 		let message = match error {
-			None => return Err(ParseError::InvalidSemantics(SemanticError::MissingErrorMessage)),
-			Some(error) => error,
+			None => return Err(DecodeError::InvalidValue),
+			Some(message) => message,
 		};
 
 		Ok(InvoiceError { erroneous_field, message })
