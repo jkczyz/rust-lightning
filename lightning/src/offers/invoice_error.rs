@@ -13,7 +13,7 @@ use core::convert::TryFrom;
 use crate::io;
 use crate::offers::parse::{ParseError, ParsedMessage, SemanticError};
 use crate::util::ser::{HighZeroBytesDroppedBigSize, WithoutLength, Writeable, Writer};
-use crate::util::string::PrintableString;
+use crate::util::string::UntrustedString;
 
 use crate::prelude::*;
 
@@ -24,8 +24,14 @@ use crate::prelude::*;
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct InvoiceError {
-	erroneous_field: Option<ErroneousField>,
-	message: String,
+	/// The field in the [`InvoiceRequest`] or the [`Invoice`] that contained an error.
+	///
+	/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
+	/// [`Invoice`]: crate::offers::invoice::Invoice
+	pub erroneous_field: Option<ErroneousField>,
+
+	/// An explanation of the error.
+	pub message: UntrustedString,
 }
 
 /// The field in the [`InvoiceRequest`] or the [`Invoice`] that contained an error.
@@ -35,24 +41,14 @@ pub struct InvoiceError {
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct ErroneousField {
-	tlv_fieldnum: u64,
-	suggested_value: Option<Vec<u8>>,
+	/// The type number of the TLV field containing the error.
+	pub tlv_fieldnum: u64,
+
+	/// A value to use for the TLV field to avoid the error.
+	pub suggested_value: Option<Vec<u8>>,
 }
 
 impl InvoiceError {
-	/// The field in the [`InvoiceRequest`] or the [`Invoice`] that contained an error.
-	///
-	/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
-	/// [`Invoice`]: crate::offers::invoice::Invoice
-	pub fn erroneous_field(&self) -> Option<&ErroneousField> {
-		self.erroneous_field.as_ref()
-	}
-
-	/// An explanation of the error.
-	pub fn message(&self) -> PrintableString {
-		PrintableString(&self.message)
-	}
-
 	pub(super) fn as_tlv_stream(&self) -> InvoiceErrorTlvStreamRef {
 		InvoiceErrorTlvStreamRef {
 			erroneous_field: self.erroneous_field.as_ref().map(|f| f.tlv_fieldnum),
@@ -64,7 +60,7 @@ impl InvoiceError {
 
 impl core::fmt::Display for InvoiceError {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
-		self.message().fmt(f)
+		self.message.fmt(f)
 	}
 }
 
@@ -77,7 +73,7 @@ impl Writeable for InvoiceError {
 tlv_stream!(InvoiceErrorTlvStream, InvoiceErrorTlvStreamRef, 0..=u64::MAX, {
 	(1, erroneous_field: (u64, HighZeroBytesDroppedBigSize)),
 	(3, suggested_value: (Vec<u8>, WithoutLength)),
-	(5, error: (String, WithoutLength)),
+	(5, error: (UntrustedString, WithoutLength)),
 });
 
 impl TryFrom<Vec<u8>> for InvoiceError {
@@ -111,7 +107,7 @@ impl From<SemanticError> for InvoiceError {
 	fn from(error: SemanticError) -> Self {
 		InvoiceError {
 			erroneous_field: None,
-			message: format!("{:?}", error),
+			message: UntrustedString(format!("{:?}", error)),
 		}
 	}
 }
@@ -123,11 +119,11 @@ mod tests {
 	use core::convert::TryFrom;
 	use crate::offers::parse::{ParseError, SemanticError};
 	use crate::util::ser::Writeable;
-	use crate::util::string::PrintableString;
+	use crate::util::string::UntrustedString;
 
 	#[test]
 	fn parses_invoice_error_without_erroneous_field() {
-		let message = "Invalid value".to_string();
+		let message = UntrustedString("Invalid value".to_string());
 		let tlv_stream = InvoiceErrorTlvStreamRef {
 			erroneous_field: None,
 			suggested_value: None,
@@ -139,8 +135,8 @@ mod tests {
 
 		match InvoiceError::try_from(buffer) {
 			Ok(invoice_error) => {
-				assert_eq!(invoice_error.message(), PrintableString("Invalid value"));
-				assert_eq!(invoice_error.erroneous_field(), None);
+				assert_eq!(invoice_error.message, UntrustedString("Invalid value".to_string()));
+				assert_eq!(invoice_error.erroneous_field, None);
 				assert_eq!(invoice_error.as_tlv_stream(), tlv_stream);
 			}
 			Err(e) => panic!("Unexpected error: {:?}", e),
@@ -150,7 +146,7 @@ mod tests {
 	#[test]
 	fn parses_invoice_error_with_erroneous_field() {
 		let suggested_value = vec![42; 32];
-		let message = "Invalid value".to_string();
+		let message = UntrustedString("Invalid value".to_string());
 		let tlv_stream = InvoiceErrorTlvStreamRef {
 			erroneous_field: Some(42),
 			suggested_value: Some(&suggested_value),
@@ -162,10 +158,10 @@ mod tests {
 
 		match InvoiceError::try_from(buffer) {
 			Ok(invoice_error) => {
-				assert_eq!(invoice_error.message(), PrintableString("Invalid value"));
+				assert_eq!(invoice_error.message, UntrustedString("Invalid value".to_string()));
 				assert_eq!(
-					invoice_error.erroneous_field(),
-					Some(&ErroneousField {
+					invoice_error.erroneous_field,
+					Some(ErroneousField {
 						tlv_fieldnum: 42,
 						suggested_value: Some(vec![42; 32])
 					}),
@@ -178,7 +174,7 @@ mod tests {
 
 	#[test]
 	fn parses_invoice_error_without_suggested_value() {
-		let message = "Invalid value".to_string();
+		let message = UntrustedString("Invalid value".to_string());
 		let tlv_stream = InvoiceErrorTlvStreamRef {
 			erroneous_field: Some(42),
 			suggested_value: None,
@@ -190,10 +186,10 @@ mod tests {
 
 		match InvoiceError::try_from(buffer) {
 			Ok(invoice_error) => {
-				assert_eq!(invoice_error.message(), PrintableString("Invalid value"));
+				assert_eq!(invoice_error.message, UntrustedString("Invalid value".to_string()));
 				assert_eq!(
-					invoice_error.erroneous_field(),
-					Some(&ErroneousField { tlv_fieldnum: 42, suggested_value: None }),
+					invoice_error.erroneous_field,
+					Some(ErroneousField { tlv_fieldnum: 42, suggested_value: None }),
 				);
 				assert_eq!(invoice_error.as_tlv_stream(), tlv_stream);
 			}
