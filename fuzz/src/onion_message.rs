@@ -291,12 +291,14 @@ mod tests {
 	#[test]
 	fn vmw_om_one_hop() {
 		let nodes = create_nodes(2);
+		let secp_ctx = Secp256k1::new();
 		let path = OnionMessagePath {
 			intermediate_nodes: Vec::new(),
 			destination: Destination::Node(nodes[1].get_node_pk()),
 		};
+		let blinded_route = BlindedPath::new_for_message(&[nodes[0].get_node_pk()], &*nodes[1].keys_manager, &secp_ctx).unwrap();
 
-		nodes[0].messenger.send_onion_message(path, OnionMessageContents::Custom(TestCustomMessage {}), None).unwrap();
+		nodes[0].messenger.send_onion_message(path, OnionMessageContents::Custom(TestCustomMessage {}), Some(blinded_route)).unwrap();
 		pass_along_path(&nodes, None);
 	}
 
