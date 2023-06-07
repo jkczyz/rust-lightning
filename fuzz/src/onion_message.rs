@@ -236,7 +236,7 @@ mod tests {
 		for i in 0..num_messengers {
 			let logger = Arc::new(TrackingLogger { lines: Mutex::new(HashMap::new()) });
 			let seed = [i as u8; 32];
-			let mut secret_bytes = [0; 32];
+			let mut secret_bytes = [i as u8; 32];
 			secret_bytes[31] = 2;
 			let secret = SecretKey::from_slice(&secret_bytes).unwrap();
 			let keys_manager = Arc::new(KeyProvider {
@@ -277,7 +277,7 @@ mod tests {
 				assert_eq!(msgs.len(), 1);
 				msgs[0].clone()
 			};
-			println!("VMW: encoded om: {:02x?}", onion_msg.encode());
+			println!("VMW: encoded om: {}", hex::encode(&onion_msg.encode()));
 			node.messenger.handle_onion_message(&prev_node.get_node_pk(), &onion_msg);
 			if idx == num_nodes - 1 {
 				// node.logger.assert_log_contains(
