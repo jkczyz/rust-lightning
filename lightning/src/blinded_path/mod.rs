@@ -160,7 +160,11 @@ fn encrypt_payload<P: Writeable>(payload: P, encrypted_tlvs_ss: [u8; 32]) -> Vec
 
 impl Writeable for BlindedPath {
 	fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
-		self.introduction_node_id.write(w)?;
+		let direction = true;
+		let mut scid = [0u8; 8];
+		scid.clone_from_slice(&self.introduction_node_id.serialize()[0..8]);
+		u64::from_le_bytes(scid).write(w)?;
+		direction.write(w)?;
 		self.blinding_point.write(w)?;
 		(self.blinded_hops.len() as u8).write(w)?;
 		for hop in &self.blinded_hops {
@@ -188,10 +192,34 @@ impl Readable for BlindedPath {
 	}
 }
 
-impl_writeable!(BlindedHop, {
-	blinded_node_id,
-	encrypted_payload
-});
+impl Writeable for BlindedHop {
+	fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
+		let mut scid = [0u8; 8];
+		scid.clone_from_slice(&self.blinded_node_id.serialize()[0..8]);
+		u64::from_le_bytes(scid).write(w)?;
+		self.encrypted_payload.write(w)?;
+		Ok(())
+	}
+
+	#[inline]
+	fn serialized_length(&self) -> usize {
+		let mut len_calc = 0;
+		let mut scid = [0u8; 8];
+		scid.clone_from_slice(&self.blinded_node_id.serialize()[0..8]);
+		len_calc += u64::from_le_bytes(scid).serialized_length();
+		len_calc += self.encrypted_payload.serialized_length();
+		return len_calc;
+	}
+}
+
+impl Readable for BlindedHop {
+	fn read<R: io::Read>(r: &mut R) -> Result<Self, DecodeError> {
+		Ok(Self {
+			blinded_node_id: Readable::read(r)?,
+			encrypted_payload: Readable::read(r)?,
+		})
+	}
+}
 
 /// TLVs to encode in an intermediate onion message packet's hop data. When provided in a blinded
 /// route, they are encoded into [`BlindedHop::encrypted_payload`].
