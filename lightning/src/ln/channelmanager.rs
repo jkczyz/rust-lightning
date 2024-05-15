@@ -10358,18 +10358,20 @@ where
 					Some(responder) => responder,
 					None => return ResponseInstruction::NoResponse,
 				};
-				let amount_msats = match InvoiceBuilder::<DerivedSigningPubkey>::amount_msats(
-					&invoice_request
-				) {
-					Ok(amount_msats) => amount_msats,
-					Err(error) => return responder.respond(OffersMessage::InvoiceError(error.into())),
-				};
+
 				let invoice_request = match invoice_request.verify(expanded_key, secp_ctx) {
 					Ok(invoice_request) => invoice_request,
 					Err(()) => {
 						let error = Bolt12SemanticError::InvalidMetadata;
 						return responder.respond(OffersMessage::InvoiceError(error.into()));
 					},
+				};
+
+				let amount_msats = match InvoiceBuilder::<DerivedSigningPubkey>::amount_msats(
+					&invoice_request.inner
+				) {
+					Ok(amount_msats) => amount_msats,
+					Err(error) => return responder.respond(OffersMessage::InvoiceError(error.into())),
 				};
 
 				let relative_expiry = DEFAULT_RELATIVE_EXPIRY.as_secs() as u32;
