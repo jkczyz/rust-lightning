@@ -8889,8 +8889,22 @@ where
 		}
 	}
 
+	///
+	pub fn send_bolt12_invoice_with_hash(
+		&self, invoice_request: VerifiedInvoiceRequest, responder: Responder,
+		payment_hash: PaymentHash
+	) {
+		let response = match self.create_invoice_response(invoice_request, Some(payment_hash)) {
+			// TODO: Use Responder::respond_with_reply_path
+			Ok(invoice) => responder.respond(OffersMessage::Invoice(invoice)),
+			Err(error) => responder.respond(OffersMessage::InvoiceError(error)),
+		};
+
+		// TODO: Send response using OnionMessenger::handle_onion_message_response
+	}
+
 	fn create_invoice_response(
-		&self, invoice_request: VerifiedInvoiceRequest
+		&self, invoice_request: VerifiedInvoiceRequest, payment_hash: Option<PaymentHash>
 	) -> Result<Bolt12Invoice, InvoiceError> {
 		let amount_msats = InvoiceBuilder::<DerivedSigningPubkey>::amount_msats(
 			&invoice_request.inner
@@ -8898,10 +8912,15 @@ where
 			.map_err(InvoiceError::from)?;
 
 		let relative_expiry = DEFAULT_RELATIVE_EXPIRY.as_secs() as u32;
-		let (payment_hash, payment_secret) = self.create_inbound_payment(
-			Some(amount_msats), relative_expiry, None
-		)
-			.map_err(|()| InvoiceError::from(Bolt12SemanticError::InvalidAmount))?;
+		let (payment_hash, payment_secret) = match payment_hash {
+			Some(payment_hash) => {
+				self.create_inbound_payment_for_hash(
+					payment_hash, Some(amount_msats), relative_expiry, None
+				)
+					.map(|payment_secret| (payment_hash, payment_secret))
+			},
+			None => self.create_inbound_payment(Some(amount_msats), relative_expiry, None),
+		}.map_err(|()| InvoiceError::from(Bolt12SemanticError::InvalidAmount))?;
 
 		let payment_context = PaymentContext::Bolt12Offer(Bolt12OfferContext {
 			offer_id: invoice_request.offer_id,
@@ -10429,7 +10448,7 @@ where
 					},
 				};
 
-				match self.create_invoice_response(invoice_request) {
+				match self.create_invoice_response(invoice_request, None) {
 					Ok(invoice) => return responder.respond(OffersMessage::Invoice(invoice)),
 					Err(error) => return responder.respond(OffersMessage::InvoiceError(error)),
 				}
