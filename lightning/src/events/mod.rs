@@ -685,6 +685,13 @@ pub enum Event {
 		/// The `payment_id` to have been associated with payment for the requested invoice.
 		payment_id: PaymentId,
 	},
+	///
+	InvoiceRequestReceived {
+		///
+		invoice_request: InvoiceRequest,
+		///
+		responder: Responder,
+	},
 	/// Indicates an outbound payment we made succeeded (i.e. it made it all the way to its target
 	/// and we got back the payment preimage for it).
 	///

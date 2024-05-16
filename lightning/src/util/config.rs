@@ -847,6 +847,8 @@ pub struct UserConfig {
 	///
 	/// [`ChannelManager`]: crate::ln::channelmanager::ChannelManager
 	pub accept_mpp_keysend: bool,
+	///
+	pub manually_respond_to_invoice_requests: bool,
 }
 
 impl Default for UserConfig {
@@ -860,6 +862,7 @@ impl Default for UserConfig {
 			manually_accept_inbound_channels: false,
 			accept_intercept_htlcs: false,
 			accept_mpp_keysend: false,
+			manually_respond_to_invoice_requests: false,
 		}
 	}
 }
@@ -879,6 +882,7 @@ impl Readable for UserConfig {
 			manually_accept_inbound_channels: Readable::read(reader)?,
 			accept_intercept_htlcs: Readable::read(reader)?,
 			accept_mpp_keysend: Readable::read(reader)?,
+			manually_respond_to_invoice_requests: Readable::read(reader)?,
 		})
 	}
 }

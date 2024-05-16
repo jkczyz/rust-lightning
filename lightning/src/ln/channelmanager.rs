@@ -8891,9 +8891,22 @@ where
 
 	///
 	pub fn send_bolt12_invoice_with_hash(
-		&self, invoice_request: VerifiedInvoiceRequest, responder: Responder,
-		payment_hash: PaymentHash
+		&self, invoice_request: InvoiceRequest, responder: Responder, payment_hash: PaymentHash
 	) {
+		let secp_ctx = &self.secp_ctx;
+		let expanded_key = &self.inbound_payment_key;
+
+		// TODO: Should we verify again or move this to create_invoice_response?
+		let invoice_request = match invoice_request.verify(expanded_key, secp_ctx) {
+			Ok(invoice_request) => invoice_request,
+			Err(()) => {
+				let error = Bolt12SemanticError::InvalidMetadata;
+				let response = responder.respond(OffersMessage::InvoiceError(error.into()));
+				// TODO: Send response using OnionMessenger::handle_onion_message_response
+				return;
+			},
+		};
+
 		let response = match self.create_invoice_response(invoice_request, Some(payment_hash)) {
 			// TODO: Use Responder::respond_with_reply_path
 			Ok(invoice) => responder.respond(OffersMessage::Invoice(invoice)),
@@ -10447,6 +10460,15 @@ where
 						return responder.respond(OffersMessage::InvoiceError(error.into()));
 					},
 				};
+
+				if self.default_configuration.manually_respond_to_invoice_requests {
+					let event = events::Event::InvoiceRequestReceived {
+						invoice_request: invoice_request.inner,
+						responder,
+					};
+					self.pending_events.lock().unwrap().push_back((event, None));
+					return ResponseInstruction::NoResponse;
+				}
 
 				match self.create_invoice_response(invoice_request, None) {
 					Ok(invoice) => return responder.respond(OffersMessage::Invoice(invoice)),
