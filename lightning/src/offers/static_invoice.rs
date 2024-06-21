@@ -240,6 +240,15 @@ macro_rules! invoice_accessors { ($self: ident, $contents: expr) => {
 	pub fn supported_quantity(&$self) -> Quantity {
 		$contents.supported_quantity()
 	}
+
+	/// Paths to the offer creator originating from publicly reachable nodes.
+	///
+	/// From [`Offer::notification_paths`].
+	///
+	/// [`Offer::notification_paths`]: crate::offers::offer::Offer::notification_paths
+	pub fn notification_paths(&$self) -> &[BlindedPath] {
+		$contents.notification_paths()
+	}
 } }
 
 impl UnsignedStaticInvoice {
@@ -405,6 +414,10 @@ impl InvoiceContents {
 
 	fn supported_quantity(&self) -> Quantity {
 		self.offer.supported_quantity()
+	}
+
+	fn notification_paths(&self) -> &[BlindedPath] {
+		self.offer.notification_paths()
 	}
 
 	fn payment_paths(&self) -> &[(BlindedPayInfo, BlindedPath)] {
@@ -683,6 +696,7 @@ mod tests {
 		assert_eq!(invoice.issuer(), None);
 		assert_eq!(invoice.supported_quantity(), Quantity::One);
 		assert_ne!(invoice.signing_pubkey(), recipient_pubkey());
+		assert_eq!(invoice.notification_paths(), &[]);
 		assert_eq!(invoice.chain(), ChainHash::using_genesis_block(Network::Bitcoin));
 		assert_eq!(invoice.payment_paths(), payment_paths.as_slice());
 		assert_eq!(invoice.created_at(), now);
@@ -715,6 +729,7 @@ mod tests {
 					issuer: None,
 					quantity_max: None,
 					node_id: Some(&offer_signing_pubkey),
+					notification_paths: None,
 				},
 				InvoiceTlvStreamRef {
 					paths: Some(Iterable(payment_paths.iter().map(|(_, path)| path))),

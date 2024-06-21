@@ -748,6 +748,7 @@ impl RefundContents {
 			issuer: self.issuer.as_ref(),
 			quantity_max: None,
 			node_id: None,
+			notification_paths: None,
 		};
 
 		let features = {
@@ -839,7 +840,7 @@ impl TryFrom<RefundTlvStream> for RefundContents {
 			OfferTlvStream {
 				chains, metadata, currency, amount: offer_amount, description,
 				features: offer_features, absolute_expiry, paths: offer_paths, issuer, quantity_max,
-				node_id,
+				node_id, notification_paths,
 			},
 			InvoiceRequestTlvStream {
 				chain, amount, features, quantity, payer_id, payer_note, paths
@@ -884,6 +885,10 @@ impl TryFrom<RefundTlvStream> for RefundContents {
 
 		if node_id.is_some() {
 			return Err(Bolt12SemanticError::UnexpectedSigningPubkey);
+		}
+
+		if notification_paths.is_some() {
+			return Err(Bolt12SemanticError::UnexpectedPaths);
 		}
 
 		let amount_msats = match amount {
@@ -997,6 +1002,7 @@ mod tests {
 					issuer: None,
 					quantity_max: None,
 					node_id: None,
+					notification_paths: None,
 				},
 				InvoiceRequestTlvStreamRef {
 					chain: None,

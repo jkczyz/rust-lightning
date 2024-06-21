@@ -704,6 +704,15 @@ macro_rules! invoice_accessors { ($self: ident, $contents: expr) => {
 		$contents.supported_quantity()
 	}
 
+	/// Paths to the offer creator originating from publicly reachable nodes.
+	///
+	/// From [`Offer::notification_paths`].
+	///
+	/// [`Offer::notification_paths`]: crate::offers::offer::Offer::notification_paths
+	pub fn notification_paths(&$self) -> &[BlindedPath] {
+		$contents.notification_paths()
+	}
+
 	/// An unpredictable series of bytes from the payer.
 	///
 	/// From [`InvoiceRequest::payer_metadata`] or [`Refund::payer_metadata`].
@@ -906,6 +915,15 @@ impl InvoiceContents {
 				Some(invoice_request.inner.offer.supported_quantity())
 			},
 			InvoiceContents::ForRefund { .. } => None,
+		}
+	}
+
+	fn notification_paths(&self) -> &[BlindedPath] {
+		match self {
+			InvoiceContents::ForOffer { invoice_request, .. } => {
+				invoice_request.inner.offer.notification_paths()
+			},
+			InvoiceContents::ForRefund { .. } => &[],
 		}
 	}
 
@@ -1521,6 +1539,7 @@ mod tests {
 		assert_eq!(invoice.issuer(), None);
 		assert_eq!(invoice.supported_quantity(), Some(Quantity::One));
 		assert_eq!(invoice.signing_pubkey(), recipient_pubkey());
+		assert_eq!(invoice.notification_paths(), &[]);
 		assert_eq!(invoice.chain(), ChainHash::using_genesis_block(Network::Bitcoin));
 		assert_eq!(invoice.amount_msats(), 1000);
 		assert_eq!(invoice.invoice_request_features(), &InvoiceRequestFeatures::empty());
@@ -1560,6 +1579,7 @@ mod tests {
 					issuer: None,
 					quantity_max: None,
 					node_id: Some(&recipient_pubkey()),
+					notification_paths: None,
 				},
 				InvoiceRequestTlvStreamRef {
 					chain: None,
@@ -1618,6 +1638,7 @@ mod tests {
 		assert_eq!(invoice.issuer(), None);
 		assert_eq!(invoice.supported_quantity(), None);
 		assert_eq!(invoice.signing_pubkey(), recipient_pubkey());
+		assert_eq!(invoice.notification_paths(), &[]);
 		assert_eq!(invoice.chain(), ChainHash::using_genesis_block(Network::Bitcoin));
 		assert_eq!(invoice.amount_msats(), 1000);
 		assert_eq!(invoice.invoice_request_features(), &InvoiceRequestFeatures::empty());
@@ -1652,6 +1673,7 @@ mod tests {
 					issuer: None,
 					quantity_max: None,
 					node_id: None,
+					notification_paths: None,
 				},
 				InvoiceRequestTlvStreamRef {
 					chain: None,

@@ -1288,6 +1288,7 @@ mod tests {
 		assert_eq!(invoice_request.issuer(), None);
 		assert_eq!(invoice_request.supported_quantity(), Quantity::One);
 		assert_eq!(invoice_request.signing_pubkey(), Some(recipient_pubkey()));
+		assert_eq!(invoice_request.notification_paths(), &[]);
 		assert_eq!(invoice_request.chain(), ChainHash::using_genesis_block(Network::Bitcoin));
 		assert_eq!(invoice_request.amount_msats(), None);
 		assert_eq!(invoice_request.invoice_request_features(), &InvoiceRequestFeatures::empty());
@@ -1314,6 +1315,7 @@ mod tests {
 					issuer: None,
 					quantity_max: None,
 					node_id: Some(&recipient_pubkey()),
+					notification_paths: None,
 				},
 				InvoiceRequestTlvStreamRef {
 					chain: None,

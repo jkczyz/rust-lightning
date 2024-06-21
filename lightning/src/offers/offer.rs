@@ -225,6 +225,7 @@ macro_rules! offer_explicit_metadata_builder_methods { (
 				chains: None, metadata: None, amount: None, description: None,
 				features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
 				supported_quantity: Quantity::One, signing_pubkey: Some(signing_pubkey),
+				notification_paths: None,
 			},
 			metadata_strategy: core::marker::PhantomData,
 			secp_ctx: None,
@@ -264,6 +265,7 @@ macro_rules! offer_derived_metadata_builder_methods { ($secp_context: ty) => {
 				chains: None, metadata: Some(metadata), amount: None, description: None,
 				features: OfferFeatures::empty(), absolute_expiry: None, issuer: None, paths: None,
 				supported_quantity: Quantity::One, signing_pubkey: Some(node_id),
+				notification_paths: None,
 			},
 			metadata_strategy: core::marker::PhantomData,
 			secp_ctx: Some(secp_ctx),
@@ -355,6 +357,15 @@ macro_rules! offer_builder_methods { (
 	/// Successive calls to this method will override the previous setting.
 	pub fn supported_quantity($($self_mut)* $self: $self_type, quantity: Quantity) -> $return_type {
 		$self.offer.supported_quantity = quantity;
+		$return_value
+	}
+
+	/// Adds a blinded path to [`Offer::notification_paths`].
+	///
+	/// Successive calls to this method will add another blinded path. Caller is responsible for not
+	/// adding duplicate paths.
+	pub fn notification_path($($self_mut)* $self: $self_type, path: BlindedPath) -> $return_type {
+		$self.offer.notification_paths.get_or_insert_with(Vec::new).push(path);
 		$return_value
 	}
 
@@ -559,6 +570,7 @@ pub(super) struct OfferContents {
 	paths: Option<Vec<BlindedPath>>,
 	supported_quantity: Quantity,
 	signing_pubkey: Option<PublicKey>,
+	notification_paths: Option<Vec<BlindedPath>>,
 }
 
 macro_rules! offer_accessors { ($self: ident, $contents: expr) => {
@@ -623,6 +635,14 @@ macro_rules! offer_accessors { ($self: ident, $contents: expr) => {
 	pub fn signing_pubkey(&$self) -> Option<bitcoin::secp256k1::PublicKey> {
 		$contents.signing_pubkey()
 	}
+
+	/// Paths to the offer creator originating from publicly reachable nodes.
+	///
+	/// Used by payment recipient to notify the offer creator of a successful payment.
+	pub fn notification_paths(&$self) -> &[$crate::blinded_path::BlindedPath] {
+		$contents.notification_paths()
+	}
+
 } }
 
 impl Offer {
@@ -912,6 +932,10 @@ impl OfferContents {
 		self.signing_pubkey
 	}
 
+	pub(super) fn notification_paths(&self) -> &[BlindedPath] {
+		self.notification_paths.as_ref().map(|paths| paths.as_slice()).unwrap_or(&[])
+	}
+
 	/// Verifies that the offer metadata was produced from the offer in the TLV stream.
 	pub(super) fn verify<T: secp256k1::Signing>(
 		&self, bytes: &[u8], key: &ExpandedKey, secp_ctx: &Secp256k1<T>
@@ -968,6 +992,7 @@ impl OfferContents {
 			issuer: self.issuer.as_ref(),
 			quantity_max: self.supported_quantity.to_tlv_record(),
 			node_id: self.signing_pubkey.as_ref(),
+			notification_paths: self.notification_paths.as_ref(),
 		}
 	}
 }
@@ -1058,6 +1083,7 @@ tlv_stream!(OfferTlvStream, OfferTlvStreamRef, OFFER_TYPES, {
 	(18, issuer: (String, WithoutLength)),
 	(20, quantity_max: (u64, HighZeroBytesDroppedBigSize)),
 	(OFFER_NODE_ID_TYPE, node_id: PublicKey),
+	(79, notification_paths: (Vec<BlindedPath>, WithoutLength)),
 });
 
 impl Bech32Encode for Offer {
@@ -1091,7 +1117,7 @@ impl TryFrom<OfferTlvStream> for OfferContents {
 	fn try_from(tlv_stream: OfferTlvStream) -> Result<Self, Self::Error> {
 		let OfferTlvStream {
 			chains, metadata, currency, amount, description, features, absolute_expiry, paths,
-			issuer, quantity_max, node_id,
+			issuer, quantity_max, node_id, notification_paths,
 		} = tlv_stream;
 
 		let metadata = metadata.map(|metadata| Metadata::Bytes(metadata));
@@ -1127,9 +1153,15 @@ impl TryFrom<OfferTlvStream> for OfferContents {
 			(node_id, paths) => (node_id, paths),
 		};
 
+		if let Some(ref notification_paths) = notification_paths {
+			if notification_paths.is_empty() {
+				return Err(Bolt12SemanticError::MissingPaths);
+			}
+		}
+
 		Ok(OfferContents {
 			chains, metadata, amount, description, features, absolute_expiry, issuer, paths,
-			supported_quantity, signing_pubkey,
+			supported_quantity, signing_pubkey, notification_paths,
 		})
 	}
 }
@@ -1189,6 +1221,7 @@ mod tests {
 		assert_eq!(offer.supported_quantity(), Quantity::One);
 		assert!(!offer.expects_quantity());
 		assert_eq!(offer.signing_pubkey(), Some(pubkey(42)));
+		assert_eq!(offer.notification_paths(), &[]);
 
 		assert_eq!(
 			offer.as_tlv_stream(),
@@ -1204,6 +1237,7 @@ mod tests {
 				issuer: None,
 				quantity_max: None,
 				node_id: Some(&pubkey(42)),
+				notification_paths: None,
 			},
 		);
 
@@ -1605,6 +1639,37 @@ mod tests {
 	}
 
 	#[test]
+	fn builds_offer_with_notification_paths() {
+		let paths = vec![
+			BlindedPath {
+				introduction_node: IntroductionNode::NodeId(pubkey(40)),
+				blinding_point: pubkey(41),
+				blinded_hops: vec![
+					BlindedHop { blinded_node_id: pubkey(43), encrypted_payload: vec![0; 43] },
+					BlindedHop { blinded_node_id: pubkey(44), encrypted_payload: vec![0; 44] },
+				],
+			},
+			BlindedPath {
+				introduction_node: IntroductionNode::NodeId(pubkey(40)),
+				blinding_point: pubkey(41),
+				blinded_hops: vec![
+					BlindedHop { blinded_node_id: pubkey(45), encrypted_payload: vec![0; 45] },
+					BlindedHop { blinded_node_id: pubkey(46), encrypted_payload: vec![0; 46] },
+				],
+			},
+		];
+
+		let offer = OfferBuilder::new(pubkey(42))
+			.notification_path(paths[0].clone())
+			.notification_path(paths[1].clone())
+			.build()
+			.unwrap();
+		let tlv_stream = offer.as_tlv_stream();
+		assert_eq!(offer.notification_paths(), paths.as_slice());
+		assert_eq!(tlv_stream.notification_paths, Some(&paths));
+	}
+
+	#[test]
 	fn fails_requesting_invoice_with_unknown_required_features() {
 		match OfferBuilder::new(pubkey(42))
 			.features_unchecked(OfferFeatures::unknown())
@@ -1808,6 +1873,43 @@ mod tests {
 			Ok(_) => panic!("expected error"),
 			Err(e) => {
 				assert_eq!(e, Bolt12ParseError::InvalidSemantics(Bolt12SemanticError::MissingSigningPubkey));
+			},
+		}
+	}
+
+	#[test]
+	fn parses_offer_with_notification_paths() {
+		let offer = OfferBuilder::new(pubkey(42))
+			.notification_path(BlindedPath {
+				introduction_node: IntroductionNode::NodeId(pubkey(40)),
+				blinding_point: pubkey(41),
+				blinded_hops: vec![
+					BlindedHop { blinded_node_id: pubkey(43), encrypted_payload: vec![0; 43] },
+					BlindedHop { blinded_node_id: pubkey(44), encrypted_payload: vec![0; 44] },
+				],
+			})
+			.notification_path(BlindedPath {
+				introduction_node: IntroductionNode::NodeId(pubkey(40)),
+				blinding_point: pubkey(41),
+				blinded_hops: vec![
+					BlindedHop { blinded_node_id: pubkey(45), encrypted_payload: vec![0; 45] },
+					BlindedHop { blinded_node_id: pubkey(46), encrypted_payload: vec![0; 46] },
+				],
+			})
+			.build()
+			.unwrap();
+		if let Err(e) = offer.to_string().parse::<Offer>() {
+			panic!("error parsing offer: {:?}", e);
+		}
+
+		let mut builder = OfferBuilder::new(pubkey(42));
+		builder.offer.notification_paths = Some(vec![]);
+
+		let offer = builder.build().unwrap();
+		match offer.to_string().parse::<Offer>() {
+			Ok(_) => panic!("expected error"),
+			Err(e) => {
+				assert_eq!(e, Bolt12ParseError::InvalidSemantics(Bolt12SemanticError::MissingPaths));
 			},
 		}
 	}
