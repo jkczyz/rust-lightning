@@ -66,7 +66,7 @@ use crate::offers::invoice::{Bolt12Invoice, DEFAULT_RELATIVE_EXPIRY, DerivedSign
 use crate::offers::invoice_error::InvoiceError;
 use crate::offers::invoice_request::{DerivedPayerId, InvoiceRequestBuilder};
 use crate::offers::nonce::Nonce;
-use crate::offers::offer::{Offer, OfferBuilder};
+use crate::offers::offer::{Amount, Offer, OfferBuilder};
 use crate::offers::parse::Bolt12SemanticError;
 use crate::offers::refund::{Refund, RefundBuilder};
 use crate::offers::signer;
@@ -9069,6 +9069,37 @@ where
 		let context = OffersContext::OutboundPayment { payment_id, nonce, hmac: Some(hmac) };
 		let reply_paths = self.create_blinded_paths(context)
 			.map_err(|()| Bolt12CreationError::BlindedPathCreationFailed)?;
+
+		let total_liquidity: u64 = {
+			let per_peer_state = &self.per_peer_state.read().unwrap();
+			let mut sum: u64 = 0;
+
+			per_peer_state.iter().for_each(|(_, peer_state_mutex)| {
+				let peer_state_lock = peer_state_mutex.lock().unwrap();
+				let peer_state = &*peer_state_lock;
+
+				sum += peer_state.channel_by_id
+					.iter()
+					.map(|(_, phase)| phase.context().get_available_balances(&self.fee_estimator).outbound_capacity_msat)
+					.sum::<u64>();
+			});
+			sum
+		};
+
+		let requested_amount_msats = match invoice_request.amount_msats() {
+			Some(amount_msats) => Some(amount_msats),
+			None => match offer.amount() {
+				Some(Amount::Bitcoin { amount_msats }) => Some(amount_msats),
+				_ => None,
+			},
+		};
+
+		if let Some(amount) = requested_amount_msats {
+			if amount > total_liquidity {
+				log_error!(self.logger, "Insufficient liquidity for payment with payment id: {}", payment_id);
+				return Err(Bolt12CreationError::InsufficientLiquidity);
+			}
+		}
 
 		let _persistence_guard = PersistenceNotifierGuard::notify_on_drop(self);
 
