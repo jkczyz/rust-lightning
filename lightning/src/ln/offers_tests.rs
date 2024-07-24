@@ -60,6 +60,7 @@ use crate::offers::invoice_request::{InvoiceRequest, InvoiceRequestFields};
 use crate::offers::nonce::Nonce;
 use crate::offers::parse::Bolt12SemanticError;
 use crate::onion_message::messenger::{Destination, PeeledOnion, new_pending_onion_message};
+use crate::offers::offer::Amount;
 use crate::onion_message::offers::OffersMessage;
 use crate::onion_message::packet::ParsedOnionMessageContents;
 use crate::routing::gossip::{NodeAlias, NodeId};
@@ -1621,9 +1622,9 @@ fn fails_creating_or_paying_for_offer_without_connected_peers() {
 	reconnect_nodes(args);
 
 	let offer = alice.node
-		.create_offer_builder(Some(absolute_expiry)).unwrap()
-		.amount_msats(10_000_000)
-		.build().unwrap();
+		.create_offer_builder(None).unwrap()
+		.amount(Amount::Currency { iso4217_code: *b"USD", amount: 6_000 })
+		.build_unchecked();
 
 	let payment_id = PaymentId([1; 32]);
 
@@ -1785,8 +1786,9 @@ fn fails_creating_invoice_request_without_blinded_reply_path() {
 
 	let offer = alice.node
 		.create_offer_builder(None).unwrap()
-		.amount_msats(10_000_000)
-		.build().unwrap();
+		.amount(Amount::Currency { iso4217_code: *b"USD", amount: 6_000 })
+		.build_unchecked();
+
 
 	let payment_id = PaymentId([1; 32]);
 
