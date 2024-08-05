@@ -26,8 +26,8 @@ use crate::offers::merkle::{
 };
 use crate::offers::nonce::Nonce;
 use crate::offers::offer::{
-	Amount, Offer, OfferContents, OfferTlvStream, OfferTlvStreamRef, Quantity,
-	EXPERIMENTAL_OFFER_TYPES, OFFER_TYPES,
+	Amount, ExperimentalOfferTlvStream, ExperimentalOfferTlvStreamRef, Offer, OfferContents,
+	OfferTlvStream, OfferTlvStreamRef, Quantity, EXPERIMENTAL_OFFER_TYPES, OFFER_TYPES,
 };
 use crate::offers::parse::{Bolt12ParseError, Bolt12SemanticError, ParsedMessage};
 use crate::util::ser::{CursorReadable, Iterable, WithoutLength, Writeable, Writer};
@@ -289,7 +289,7 @@ impl UnsignedStaticInvoice {
 			record.write(&mut bytes).unwrap();
 		}
 
-		let (_, invoice_tlv_stream) = contents.as_tlv_stream();
+		let (_, invoice_tlv_stream, _) = contents.as_tlv_stream();
 		invoice_tlv_stream.write(&mut bytes).unwrap();
 
 		let mut experimental_bytes = Vec::new();
@@ -424,7 +424,9 @@ impl InvoiceContents {
 			payment_hash: None,
 		};
 
-		(self.offer.as_tlv_stream(), invoice)
+		let (offer, experimental_offer) = self.offer.as_tlv_stream();
+
+		(offer, invoice, experimental_offer)
 	}
 
 	fn chain(&self) -> ChainHash {
@@ -521,29 +523,41 @@ impl TryFrom<Vec<u8>> for StaticInvoice {
 	}
 }
 
-type FullInvoiceTlvStream = (OfferTlvStream, InvoiceTlvStream, SignatureTlvStream);
+type FullInvoiceTlvStream =
+	(OfferTlvStream, InvoiceTlvStream, SignatureTlvStream, ExperimentalOfferTlvStream);
 
 impl CursorReadable for FullInvoiceTlvStream {
 	fn read<R: AsRef<[u8]>>(r: &mut io::Cursor<R>) -> Result<Self, DecodeError> {
 		let offer = CursorReadable::read(r)?;
 		let invoice = CursorReadable::read(r)?;
 		let signature = CursorReadable::read(r)?;
+		let experimental_offer = CursorReadable::read(r)?;
 
-		Ok((offer, invoice, signature))
+		Ok((offer, invoice, signature, experimental_offer))
 	}
 }
 
-type PartialInvoiceTlvStream = (OfferTlvStream, InvoiceTlvStream);
+type PartialInvoiceTlvStream = (OfferTlvStream, InvoiceTlvStream, ExperimentalOfferTlvStream);
 
-type PartialInvoiceTlvStreamRef<'a> = (OfferTlvStreamRef<'a>, InvoiceTlvStreamRef<'a>);
+type PartialInvoiceTlvStreamRef<'a> =
+	(OfferTlvStreamRef<'a>, InvoiceTlvStreamRef<'a>, ExperimentalOfferTlvStreamRef);
 
 impl TryFrom<ParsedMessage<FullInvoiceTlvStream>> for StaticInvoice {
 	type Error = Bolt12ParseError;
 
 	fn try_from(invoice: ParsedMessage<FullInvoiceTlvStream>) -> Result<Self, Self::Error> {
 		let ParsedMessage { bytes, tlv_stream } = invoice;
-		let (offer_tlv_stream, invoice_tlv_stream, SignatureTlvStream { signature }) = tlv_stream;
-		let contents = InvoiceContents::try_from((offer_tlv_stream, invoice_tlv_stream))?;
+		let (
+			offer_tlv_stream,
+			invoice_tlv_stream,
+			SignatureTlvStream { signature },
+			experimental_offer_tlv_stream,
+		) = tlv_stream;
+		let contents = InvoiceContents::try_from((
+			offer_tlv_stream,
+			invoice_tlv_stream,
+			experimental_offer_tlv_stream,
+		))?;
 
 		let signature = match signature {
 			None => {
@@ -579,6 +593,7 @@ impl TryFrom<PartialInvoiceTlvStream> for InvoiceContents {
 				payment_hash,
 				amount,
 			},
+			experimental_offer_tlv_stream,
 		) = tlv_stream;
 
 		if payment_hash.is_some() {
@@ -611,7 +626,7 @@ impl TryFrom<PartialInvoiceTlvStream> for InvoiceContents {
 		}
 
 		Ok(InvoiceContents {
-			offer: OfferContents::try_from(offer_tlv_stream)?,
+			offer: OfferContents::try_from((offer_tlv_stream, experimental_offer_tlv_stream))?,
 			payment_paths,
 			message_paths,
 			created_at,
@@ -634,7 +649,9 @@ mod tests {
 	use crate::offers::merkle;
 	use crate::offers::merkle::{SignatureTlvStreamRef, TaggedHash};
 	use crate::offers::nonce::Nonce;
-	use crate::offers::offer::{Offer, OfferBuilder, OfferTlvStreamRef, Quantity};
+	use crate::offers::offer::{
+		ExperimentalOfferTlvStreamRef, Offer, OfferBuilder, OfferTlvStreamRef, Quantity,
+	};
 	use crate::offers::parse::{Bolt12ParseError, Bolt12SemanticError};
 	use crate::offers::static_invoice::{
 		StaticInvoice, StaticInvoiceBuilder, UnsignedStaticInvoice, DEFAULT_RELATIVE_EXPIRY,
@@ -648,27 +665,39 @@ mod tests {
 	use bitcoin::Network;
 	use core::time::Duration;
 
-	type FullInvoiceTlvStreamRef<'a> =
-		(OfferTlvStreamRef<'a>, InvoiceTlvStreamRef<'a>, SignatureTlvStreamRef<'a>);
+	type FullInvoiceTlvStreamRef<'a> = (
+		OfferTlvStreamRef<'a>,
+		InvoiceTlvStreamRef<'a>,
+		SignatureTlvStreamRef<'a>,
+		ExperimentalOfferTlvStreamRef,
+	);
 
 	impl StaticInvoice {
 		fn as_tlv_stream(&self) -> FullInvoiceTlvStreamRef {
-			let (offer_tlv_stream, invoice_tlv_stream) = self.contents.as_tlv_stream();
+			let (offer_tlv_stream, invoice_tlv_stream, experimental_offer_tlv_stream) =
+				self.contents.as_tlv_stream();
 			(
 				offer_tlv_stream,
 				invoice_tlv_stream,
 				SignatureTlvStreamRef { signature: Some(&self.signature) },
+				experimental_offer_tlv_stream,
 			)
 		}
 	}
 
 	fn tlv_stream_to_bytes(
-		tlv_stream: &(OfferTlvStreamRef, InvoiceTlvStreamRef, SignatureTlvStreamRef),
+		tlv_stream: &(
+			OfferTlvStreamRef,
+			InvoiceTlvStreamRef,
+			SignatureTlvStreamRef,
+			ExperimentalOfferTlvStreamRef,
+		),
 	) -> Vec<u8> {
 		let mut buffer = Vec::new();
 		tlv_stream.0.write(&mut buffer).unwrap();
 		tlv_stream.1.write(&mut buffer).unwrap();
 		tlv_stream.2.write(&mut buffer).unwrap();
+		tlv_stream.3.write(&mut buffer).unwrap();
 		buffer
 	}
 
@@ -798,6 +827,7 @@ mod tests {
 					message_paths: Some(&paths),
 				},
 				SignatureTlvStreamRef { signature: Some(&invoice.signature()) },
+				ExperimentalOfferTlvStreamRef {},
 			)
 		);
 
@@ -912,7 +942,7 @@ mod tests {
 
 		// Error if offer paths are missing.
 		let mut offer_without_paths = valid_offer.clone();
-		let mut offer_tlv_stream = offer_without_paths.as_tlv_stream();
+		let (mut offer_tlv_stream, _) = offer_without_paths.as_tlv_stream();
 		offer_tlv_stream.paths.take();
 		let mut buffer = Vec::new();
 		offer_tlv_stream.write(&mut buffer).unwrap();
@@ -948,7 +978,7 @@ mod tests {
 				.unwrap();
 
 		let mut offer_missing_issuer_id = valid_offer.clone();
-		let mut offer_tlv_stream = offer_missing_issuer_id.as_tlv_stream();
+		let (mut offer_tlv_stream, _) = offer_missing_issuer_id.as_tlv_stream();
 		offer_tlv_stream.issuer_id.take();
 		let mut buffer = Vec::new();
 		offer_tlv_stream.write(&mut buffer).unwrap();
