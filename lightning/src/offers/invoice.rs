@@ -1709,7 +1709,9 @@ mod tests {
 				ExperimentalOfferTlvStreamRef {
 					experimental_foo: None,
 				},
-				ExperimentalInvoiceRequestTlvStreamRef {},
+				ExperimentalInvoiceRequestTlvStreamRef {
+					experimental_bar: None,
+				},
 			),
 		);
 
@@ -1806,7 +1808,9 @@ mod tests {
 				ExperimentalOfferTlvStreamRef {
 					experimental_foo: None,
 				},
-				ExperimentalInvoiceRequestTlvStreamRef {},
+				ExperimentalInvoiceRequestTlvStreamRef {
+					experimental_bar: None,
+				},
 			),
 		);
 
