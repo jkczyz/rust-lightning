@@ -320,17 +320,13 @@ pub(super) fn blinded_hops<T: secp256k1::Signing + secp256k1::Verification>(
 		.max()
 		.unwrap_or(0);
 
-	let tlvs_mut = intermediate_nodes.iter_mut().map(|node| BlindedPaymentTlvsMut::Forward(&mut node.tlvs))
-		.chain(core::iter::once(BlindedPaymentTlvsMut::Receive(&mut payee_tlvs)));
+	let path = intermediate_nodes
+		.iter_mut()
+		.map(|node| (node.node_id, BlindedPaymentTlvsMut::Forward(&mut node.tlvs)))
+		.chain(core::iter::once((payee_node_id, BlindedPaymentTlvsMut::Receive(&mut payee_tlvs))))
+		.map(|(pubkey, tlvs)| (pubkey, tlvs.pad_tlvs(max_length)));
 
-	let length_tlvs = tlvs_mut.map(|tlv| tlv.pad_tlvs(max_length));
-
-	// Immutable / Mutable burrow issue cannot be resolved at this point because
-	// both length_tlvs, and pks are needed in the next step.
-	let pks = intermediate_nodes.iter().map(|node| &node.node_id)
-		.chain(core::iter::once(&payee_node_id));
-
-	utils::construct_blinded_hops(secp_ctx, pks, length_tlvs, session_priv)
+	utils::construct_blinded_hops(secp_ctx, path, session_priv)
 }
 
 // Advance the blinded onion payment path by one hop, so make the second hop into the new

@@ -69,7 +69,7 @@ fn blinded_payment_path(
 	};
 	let mut secp_ctx = Secp256k1::new();
 	BlindedPath::new_for_payment(
-		&intermediate_nodes[..], *node_ids.last().unwrap(), payee_tlvs,
+		&mut intermediate_nodes[..], *node_ids.last().unwrap(), payee_tlvs,
 		intro_node_max_htlc_opt.unwrap_or_else(|| channel_upds.last().unwrap().htlc_maximum_msat),
 		TEST_FINAL_CLTV as u16, keys_manager, &secp_ctx
 	).unwrap()

@@ -29,14 +29,15 @@ use crate::prelude::*;
 
 // TODO: DRY with onion_utils::construct_onion_keys_callback
 #[inline]
-pub(crate) fn construct_keys_callback<'a, T, I, F>(
+pub(crate) fn construct_keys_callback<'a, T, I, F, W>(
 	secp_ctx: &Secp256k1<T>, unblinded_path: I, destination: Option<Destination>,
 	session_priv: &SecretKey, mut callback: F
 ) -> Result<(), secp256k1::Error>
 where
 	T: secp256k1::Signing + secp256k1::Verification,
-	I: Iterator<Item=&'a PublicKey>,
-	F: FnMut(PublicKey, SharedSecret, PublicKey, [u8; 32], Option<PublicKey>, Option<Vec<u8>>),
+	I: Iterator<Item=(PublicKey, Option<W>)>,
+	W: Writeable,
+	F: FnMut(PublicKey, SharedSecret, PublicKey, [u8; 32], Option<PublicKey>, Option<Vec<u8>>, Option<W>),
 {
 	let mut msg_blinding_point_priv = session_priv.clone();
 	let mut msg_blinding_point = PublicKey::from_secret_key(secp_ctx, &msg_blinding_point_priv);
@@ -44,7 +45,7 @@ where
 	let mut onion_packet_pubkey = msg_blinding_point.clone();
 
 	macro_rules! build_keys {
-		($pk: expr, $blinded: expr, $encrypted_payload: expr) => {{
+		($pk: expr, $blinded: expr, $encrypted_payload: expr, $unencrypted_payload: expr) => {{
 			let encrypted_data_ss = SharedSecret::new(&$pk, &msg_blinding_point_priv);
 
 			let blinded_hop_pk = if $blinded { $pk } else {
@@ -59,14 +60,14 @@ where
 
 			let rho = onion_utils::gen_rho_from_shared_secret(encrypted_data_ss.as_ref());
 			let unblinded_pk_opt = if $blinded { None } else { Some($pk) };
-			callback(blinded_hop_pk, onion_packet_ss, onion_packet_pubkey, rho, unblinded_pk_opt, $encrypted_payload);
+			callback(blinded_hop_pk, onion_packet_ss, onion_packet_pubkey, rho, unblinded_pk_opt, $encrypted_payload, $unencrypted_payload);
 			(encrypted_data_ss, onion_packet_ss)
 		}}
 	}
 
 	macro_rules! build_keys_in_loop {
-		($pk: expr, $blinded: expr, $encrypted_payload: expr) => {
-			let (encrypted_data_ss, onion_packet_ss) = build_keys!($pk, $blinded, $encrypted_payload);
+		($pk: expr, $blinded: expr, $encrypted_payload: expr, $unencrypted_payload: expr) => {
+			let (encrypted_data_ss, onion_packet_ss) = build_keys!($pk, $blinded, $encrypted_payload, $unencrypted_payload);
 
 			let msg_blinding_point_blinding_factor = {
 				let mut sha = Sha256::engine();
@@ -89,17 +90,17 @@ where
 		};
 	}
 
-	for pk in unblinded_path {
-		build_keys_in_loop!(*pk, false, None);
+	for (pk, tlvs) in unblinded_path {
+		build_keys_in_loop!(pk, false, None, tlvs);
 	}
 	if let Some(dest) = destination {
 		match dest {
 			Destination::Node(pk) => {
-				build_keys!(pk, false, None);
+				build_keys!(pk, false, None, None);
 			},
 			Destination::BlindedPath(BlindedPath { blinded_hops, .. }) => {
 				for hop in blinded_hops {
-					build_keys_in_loop!(hop.blinded_node_id, true, Some(hop.encrypted_payload));
+					build_keys_in_loop!(hop.blinded_node_id, true, Some(hop.encrypted_payload), None);
 				}
 			},
 		}
@@ -107,23 +108,21 @@ where
 	Ok(())
 }
 
-// Panics if `unblinded_tlvs` length is less than `unblinded_pks` length
-pub(super) fn construct_blinded_hops<'a, T, I1, I2>(
-	secp_ctx: &Secp256k1<T>, unblinded_pks: I1, mut unblinded_tlvs: I2, session_priv: &SecretKey
+pub(super) fn construct_blinded_hops<'a, T, I, W>(
+	secp_ctx: &Secp256k1<T>, unblinded_path: I, session_priv: &SecretKey
 ) -> Result<Vec<BlindedHop>, secp256k1::Error>
 where
 	T: secp256k1::Signing + secp256k1::Verification,
-	I1: Iterator<Item=&'a PublicKey>,
-	I2: Iterator,
-	I2::Item: Writeable
+	I: Iterator<Item=(PublicKey, W)>,
+	W: Writeable,
 {
-	let mut blinded_hops = Vec::with_capacity(unblinded_pks.size_hint().0);
+	let mut blinded_hops = Vec::with_capacity(unblinded_path.size_hint().0);
 	construct_keys_callback(
-		secp_ctx, unblinded_pks, None, session_priv,
-		|blinded_node_id, _, _, encrypted_payload_rho, _, _| {
+		secp_ctx, unblinded_path.map(|(pubkey, tlvs)| (pubkey, Some(tlvs))), None, session_priv,
+		|blinded_node_id, _, _, encrypted_payload_rho, _, _, unencrypted_payload| {
 			blinded_hops.push(BlindedHop {
 				blinded_node_id,
-				encrypted_payload: encrypt_payload(unblinded_tlvs.next().unwrap(), encrypted_payload_rho),
+				encrypted_payload: encrypt_payload(unencrypted_payload.unwrap(), encrypted_payload_rho),
 			});
 		})?;
 	Ok(blinded_hops)

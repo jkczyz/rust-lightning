@@ -158,7 +158,7 @@ impl<G: Deref<Target = NetworkGraph<L>> + Clone, L: Deref, ES: Deref, S: Deref, 
 			})
 			.map(|forward_node| {
 				BlindedPath::new_for_payment(
-					&[forward_node], recipient, tlvs.clone(), u64::MAX, MIN_FINAL_CLTV_EXPIRY_DELTA,
+					&mut [forward_node], recipient, tlvs.clone(), u64::MAX, MIN_FINAL_CLTV_EXPIRY_DELTA,
 					&*self.entropy_source, secp_ctx
 				)
 			})
