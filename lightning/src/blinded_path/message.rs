@@ -198,7 +198,7 @@ pub(super) fn blinded_hops<T: secp256k1::Signing + secp256k1::Verification>(
 		.max()
 		.unwrap_or(0);
 
-	let path = pks.zip(tlvs.map(|tlv| tlv.pad_tlvs(max_length)));
+	let path = pks.zip(tlvs).map(|(pk, tlvs)| (pk, tlvs.pad_tlvs(max_length)));
 
 	utils::construct_blinded_hops(secp_ctx, path, session_priv)
 }
