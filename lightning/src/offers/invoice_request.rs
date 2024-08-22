@@ -759,7 +759,31 @@ macro_rules! invoice_request_respond_with_explicit_signing_pubkey_methods { (
 			None => return Err(Bolt12SemanticError::MissingSigningPubkey),
 		};
 
-		<$builder>::for_offer(&$contents, payment_paths, created_at, payment_hash, signing_pubkey)
+		let amount_msats = <$builder>::amount_msats(&$contents)?;
+
+		<$builder>::for_offer(
+			&$contents, payment_paths, created_at, payment_hash, amount_msats, signing_pubkey,
+		)
+	}
+
+	#[cfg(test)]
+	#[allow(dead_code)]
+	pub(super) fn respond_with_no_std_using_amount_msats(
+		&$self, payment_paths: Vec<BlindedPaymentPath>, payment_hash: PaymentHash,
+		created_at: core::time::Duration, amount_msats: u64,
+	) -> Result<$builder, Bolt12SemanticError> {
+		if $contents.invoice_request_features().requires_unknown_bits() {
+			return Err(Bolt12SemanticError::UnknownRequiredFeatures);
+		}
+
+		let signing_pubkey = match $contents.contents.inner.offer.signing_pubkey() {
+			Some(signing_pubkey) => signing_pubkey,
+			None => return Err(Bolt12SemanticError::MissingSigningPubkey),
+		};
+
+		<$builder>::for_offer(
+			&$contents, payment_paths, created_at, payment_hash, amount_msats, signing_pubkey,
+		)
 	}
 
 	#[cfg(test)]
@@ -774,7 +798,11 @@ macro_rules! invoice_request_respond_with_explicit_signing_pubkey_methods { (
 			return Err(Bolt12SemanticError::UnknownRequiredFeatures);
 		}
 
-		<$builder>::for_offer(&$contents, payment_paths, created_at, payment_hash, signing_pubkey)
+		let amount_msats = <$builder>::amount_msats(&$contents)?;
+
+		<$builder>::for_offer(
+			&$contents, payment_paths, created_at, payment_hash, amount_msats, signing_pubkey,
+		)
 	}
 } }
 
@@ -919,8 +947,10 @@ macro_rules! invoice_request_respond_with_derived_signing_pubkey_methods { (
 			None => return Err(Bolt12SemanticError::MissingSigningPubkey),
 		}
 
+		let amount_msats = <$builder>::amount_msats(&$self.inner)?;
+
 		<$builder>::for_offer_using_keys(
-			&$self.inner, payment_paths, created_at, payment_hash, keys
+			&$self.inner, payment_paths, created_at, payment_hash, amount_msats, keys,
 		)
 	}
 } }

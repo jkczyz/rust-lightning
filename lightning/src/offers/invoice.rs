@@ -214,9 +214,9 @@ macro_rules! invoice_explicit_signing_pubkey_builder_methods { ($self: ident, $s
 	#[cfg_attr(c_bindings, allow(dead_code))]
 	pub(super) fn for_offer(
 		invoice_request: &'a InvoiceRequest, payment_paths: Vec<BlindedPaymentPath>,
-		created_at: Duration, payment_hash: PaymentHash, signing_pubkey: PublicKey
+		created_at: Duration, payment_hash: PaymentHash, amount_msats: u64,
+		signing_pubkey: PublicKey,
 	) -> Result<Self, Bolt12SemanticError> {
-		let amount_msats = Self::amount_msats(invoice_request)?;
 		let contents = InvoiceContents::ForOffer {
 			invoice_request: invoice_request.contents.clone(),
 			fields: Self::fields(
@@ -272,9 +272,8 @@ macro_rules! invoice_derived_signing_pubkey_builder_methods { ($self: ident, $se
 	#[cfg_attr(c_bindings, allow(dead_code))]
 	pub(super) fn for_offer_using_keys(
 		invoice_request: &'a InvoiceRequest, payment_paths: Vec<BlindedPaymentPath>,
-		created_at: Duration, payment_hash: PaymentHash, keys: Keypair
+		created_at: Duration, payment_hash: PaymentHash, amount_msats: u64, keys: Keypair,
 	) -> Result<Self, Bolt12SemanticError> {
-		let amount_msats = Self::amount_msats(invoice_request)?;
 		let signing_pubkey = keys.public_key();
 		let contents = InvoiceContents::ForOffer {
 			invoice_request: invoice_request.contents.clone(),
@@ -2215,6 +2214,29 @@ mod tests {
 		match Bolt12Invoice::try_from(tlv_stream.to_bytes()) {
 			Ok(_) => panic!("expected error"),
 			Err(e) => assert_eq!(e, Bolt12ParseError::InvalidSemantics(Bolt12SemanticError::MissingAmount)),
+		}
+	}
+
+	#[test]
+	fn parses_invoice_with_currency() {
+		let invoice = OfferBuilder::new(recipient_pubkey())
+			.amount(Amount::Currency { iso4217_code: *b"USD", amount: 1000 })
+			.build().unwrap()
+			.request_invoice(vec![1; 32], payer_pubkey()).unwrap()
+			.build().unwrap()
+			.sign(payer_sign).unwrap()
+			.respond_with_no_std_using_amount_msats(
+				payment_paths(), payment_hash(), now(), 10_000_000,
+			)
+			.unwrap()
+			.build().unwrap()
+			.sign(recipient_sign).unwrap();
+
+		let mut buffer = Vec::new();
+		invoice.write(&mut buffer).unwrap();
+
+		if let Err(e) = Bolt12Invoice::try_from(buffer) {
+			panic!("error parsing invoice: {:?}", e);
 		}
 	}
 
