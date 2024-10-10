@@ -1138,14 +1138,18 @@ impl<L: Deref<Target = u64>, HT: Deref<Target = HistoricalLiquidityTracker>, T: 
 DirectedChannelLiquidity< L, HT, T> {
 	/// Returns a liquidity penalty for routing the given HTLC `amount_msat` through the channel in
 	/// this direction.
-	fn penalty_msat(&self, amount_msat: u64, score_params: &ProbabilisticScoringFeeParameters) -> u64 {
+	fn penalty_msat(
+		&self, amount_msat: u64, inflight_htlc_msat: u64,
+		score_params: &ProbabilisticScoringFeeParameters,
+	) -> u64 {
+		let total_inflight_amount_msat = amount_msat.saturating_add(inflight_htlc_msat);
 		let available_capacity = self.capacity_msat;
 		let max_liquidity_msat = self.max_liquidity_msat();
 		let min_liquidity_msat = core::cmp::min(self.min_liquidity_msat(), max_liquidity_msat);
 
-		let mut res = if amount_msat <= min_liquidity_msat {
+		let mut res = if total_inflight_amount_msat <= min_liquidity_msat {
 			0
-		} else if amount_msat >= max_liquidity_msat {
+		} else if total_inflight_amount_msat >= max_liquidity_msat {
 			// Equivalent to hitting the else clause below with the amount equal to the effective
 			// capacity and without any certainty on the liquidity upper bound, plus the
 			// impossibility penalty.
@@ -1155,8 +1159,10 @@ DirectedChannelLiquidity< L, HT, T> {
 					score_params.liquidity_penalty_amount_multiplier_msat)
 				.saturating_add(score_params.considered_impossible_penalty_msat)
 		} else {
-			let (numerator, denominator) = success_probability(amount_msat,
-				min_liquidity_msat, max_liquidity_msat, available_capacity, score_params, false);
+			let (numerator, denominator) = success_probability(
+				total_inflight_amount_msat, min_liquidity_msat, max_liquidity_msat,
+				available_capacity, score_params, false,
+			);
 			if denominator - numerator < denominator / PRECISION_LOWER_BOUND_DENOMINATOR {
 				// If the failure probability is < 1.5625% (as 1 - numerator/denominator < 1/64),
 				// don't bother trying to use the log approximation as it gets too noisy to be
@@ -1171,7 +1177,7 @@ DirectedChannelLiquidity< L, HT, T> {
 			}
 		};
 
-		if amount_msat >= available_capacity {
+		if total_inflight_amount_msat >= available_capacity {
 			// We're trying to send more than the capacity, use a max penalty.
 			res = res.saturating_add(Self::combined_penalty_msat(amount_msat,
 				NEGATIVE_LOG10_UPPER_BOUND * 2048,
@@ -1195,8 +1201,10 @@ DirectedChannelLiquidity< L, HT, T> {
 				// If we don't have any valid points (or, once decayed, we have less than a full
 				// point), redo the non-historical calculation with no liquidity bounds tracked and
 				// the historical penalty multipliers.
-				let (numerator, denominator) = success_probability(amount_msat, 0,
-					available_capacity, available_capacity, score_params, true);
+				let (numerator, denominator) = success_probability(
+					total_inflight_amount_msat, 0, available_capacity, available_capacity,
+					score_params, true,
+				);
 				let negative_log10_times_2048 =
 					log_approx::negative_log10_times_2048(numerator, denominator);
 				res = res.saturating_add(Self::combined_penalty_msat(amount_msat, negative_log10_times_2048,
@@ -1353,13 +1361,12 @@ impl<G: Deref<Target = NetworkGraph<L>>, L: Deref> ScoreLookUp for Probabilistic
 			_ => {},
 		}
 
-		let amount_msat = usage.amount_msat.saturating_add(usage.inflight_htlc_msat);
 		let capacity_msat = usage.effective_capacity.as_msat();
 		self.channel_liquidities
 			.get(scid)
 			.unwrap_or(&ChannelLiquidity::new(Duration::ZERO))
 			.as_directed(&source, &target, capacity_msat)
-			.penalty_msat(amount_msat, score_params)
+			.penalty_msat(usage.amount_msat, usage.inflight_htlc_msat, score_params)
 			.saturating_add(anti_probing_penalty_msat)
 			.saturating_add(base_penalty_msat)
 	}
@@ -3269,7 +3276,7 @@ mod tests {
 				short_channel_id: 42,
 			});
 
-			assert_eq!(scorer.channel_penalty_msat(&candidate, usage, &params), 2050);
+			assert_eq!(scorer.channel_penalty_msat(&candidate, usage, &params), 2048);
 
 			let usage = ChannelUsage {
 				amount_msat: 1,
