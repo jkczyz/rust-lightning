@@ -1190,7 +1190,8 @@ DirectedChannelLiquidity< L, HT, T> {
 		   score_params.historical_liquidity_penalty_amount_multiplier_msat != 0 {
 			if let Some(cumulative_success_prob_times_billion) = self.liquidity_history
 				.calculate_success_probability_times_billion(
-					score_params, amount_msat, self.capacity_msat)
+					score_params, total_inflight_amount_msat, self.capacity_msat
+				)
 			{
 				let historical_negative_log10_times_2048 =
 					log_approx::negative_log10_times_2048(cumulative_success_prob_times_billion + 1, 1024 * 1024 * 1024);
