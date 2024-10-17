@@ -130,7 +130,8 @@ impl<'a> StaticInvoiceBuilder<'a> {
 		Ok(Self { offer_bytes: &offer.bytes, invoice, keys })
 	}
 
-	/// Builds a signed [`StaticInvoice`] after checking for valid semantics.
+	/// Builds an [`UnsignedStaticInvoice`] after checking for valid semantics, returning it along with
+	/// the [`Keypair`] needed to sign it.
 	pub fn build(self) -> Result<(UnsignedStaticInvoice, Keypair), Bolt12SemanticError> {
 		#[cfg(feature = "std")]
 		{
