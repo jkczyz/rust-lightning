@@ -121,10 +121,10 @@ use crate::ln::msgs::DecodeError;
 use crate::offers::invoice_macros::{invoice_accessors_common, invoice_builder_methods_common};
 #[cfg(test)]
 use crate::offers::invoice_macros::invoice_builder_methods_test;
-use crate::offers::invoice_request::{INVOICE_REQUEST_PAYER_ID_TYPE, INVOICE_REQUEST_TYPES, IV_BYTES as INVOICE_REQUEST_IV_BYTES, InvoiceRequest, InvoiceRequestContents, InvoiceRequestTlvStream, InvoiceRequestTlvStreamRef};
+use crate::offers::invoice_request::{EXPERIMENTAL_INVOICE_REQUEST_TYPES, INVOICE_REQUEST_PAYER_ID_TYPE, INVOICE_REQUEST_TYPES, IV_BYTES as INVOICE_REQUEST_IV_BYTES, InvoiceRequest, InvoiceRequestContents, InvoiceRequestTlvStream, InvoiceRequestTlvStreamRef};
 use crate::offers::merkle::{SignError, SignFn, SignatureTlvStream, SignatureTlvStreamRef, TaggedHash, TlvStream, self};
 use crate::offers::nonce::Nonce;
-use crate::offers::offer::{Amount, OFFER_TYPES, OfferTlvStream, OfferTlvStreamRef, Quantity};
+use crate::offers::offer::{Amount, EXPERIMENTAL_OFFER_TYPES, OFFER_TYPES, OfferTlvStream, OfferTlvStreamRef, Quantity};
 use crate::offers::parse::{Bolt12ParseError, Bolt12SemanticError, ParsedMessage};
 use crate::offers::payer::{PAYER_METADATA_TYPE, PayerTlvStream, PayerTlvStreamRef};
 use crate::offers::refund::{IV_BYTES_WITH_METADATA as REFUND_IV_BYTES_WITH_METADATA, IV_BYTES_WITHOUT_METADATA as REFUND_IV_BYTES_WITHOUT_METADATA, Refund, RefundContents};
@@ -493,7 +493,8 @@ where
 impl UnsignedBolt12Invoice {
 	fn new(invreq_bytes: &[u8], contents: InvoiceContents) -> Self {
 		const NON_EXPERIMENTAL_TYPES: core::ops::Range<u64> = 0..INVOICE_REQUEST_TYPES.end;
-		const EXPERIMENTAL_TYPES: core::ops::Range<u64> = 0..0;
+		const EXPERIMENTAL_TYPES: core::ops::Range<u64> =
+			EXPERIMENTAL_OFFER_TYPES.start..EXPERIMENTAL_INVOICE_REQUEST_TYPES.end;
 
 		let mut bytes = Vec::new();
 
