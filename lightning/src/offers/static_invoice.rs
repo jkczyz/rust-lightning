@@ -26,7 +26,8 @@ use crate::offers::merkle::{
 };
 use crate::offers::nonce::Nonce;
 use crate::offers::offer::{
-	Amount, Offer, OfferContents, OfferTlvStream, OfferTlvStreamRef, Quantity, OFFER_TYPES,
+	Amount, Offer, OfferContents, OfferTlvStream, OfferTlvStreamRef, Quantity,
+	EXPERIMENTAL_OFFER_TYPES, OFFER_TYPES,
 };
 use crate::offers::parse::{Bolt12ParseError, Bolt12SemanticError, ParsedMessage};
 use crate::util::ser::{CursorReadable, Iterable, WithoutLength, Writeable, Writer};
@@ -277,7 +278,7 @@ macro_rules! invoice_accessors_signing_pubkey {
 impl UnsignedStaticInvoice {
 	fn new(offer_bytes: &Vec<u8>, contents: InvoiceContents) -> Self {
 		const NON_EXPERIMENTAL_TYPES: core::ops::Range<u64> = OFFER_TYPES;
-		const EXPERIMENTAL_TYPES: core::ops::Range<u64> = 0..0;
+		const EXPERIMENTAL_TYPES: core::ops::Range<u64> = EXPERIMENTAL_OFFER_TYPES;
 
 		let mut bytes = Vec::new();
 
