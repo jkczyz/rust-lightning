@@ -492,6 +492,7 @@ where
 
 impl UnsignedBolt12Invoice {
 	fn new(invreq_bytes: &[u8], contents: InvoiceContents) -> Self {
+		// TLV record ranges applicable to invreq_bytes.
 		const NON_EXPERIMENTAL_TYPES: core::ops::Range<u64> = 0..INVOICE_REQUEST_TYPES.end;
 		const EXPERIMENTAL_TYPES: core::ops::Range<u64> =
 			EXPERIMENTAL_OFFER_TYPES.start..EXPERIMENTAL_INVOICE_REQUEST_TYPES.end;

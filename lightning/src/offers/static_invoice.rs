@@ -277,6 +277,7 @@ macro_rules! invoice_accessors_signing_pubkey {
 
 impl UnsignedStaticInvoice {
 	fn new(offer_bytes: &Vec<u8>, contents: InvoiceContents) -> Self {
+		// TLV record ranges applicable to offer_bytes.
 		const NON_EXPERIMENTAL_TYPES: core::ops::Range<u64> = OFFER_TYPES;
 		const EXPERIMENTAL_TYPES: core::ops::Range<u64> = EXPERIMENTAL_OFFER_TYPES;
 
