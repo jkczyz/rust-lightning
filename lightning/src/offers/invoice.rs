@@ -1240,11 +1240,10 @@ impl TryFrom<Vec<u8>> for UnsignedBolt12Invoice {
 
 		let tagged_hash = TaggedHash::from_valid_tlv_stream_bytes(SIGNATURE_TAG, &bytes);
 
-		let mut offset = 0;
-		for tlv_record in TlvStream::new(&bytes).range(0..INVOICE_TYPES.end) {
-			offset = tlv_record.end;
-		}
-
+		let offset = TlvStream::new(&bytes)
+			.range(0..INVOICE_TYPES.end)
+			.last()
+			.map_or(0, |last_record| last_record.end);
 		let experimental_bytes = bytes.split_off(offset);
 
 		Ok(UnsignedBolt12Invoice { bytes, experimental_bytes, contents, tagged_hash })
