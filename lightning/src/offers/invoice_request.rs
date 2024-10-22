@@ -530,6 +530,7 @@ impl UnsignedInvoiceRequest {
 			offer.bytes.len()
 			+ payer_tlv_stream.serialized_length()
 			+ invoice_request_tlv_stream.serialized_length()
+			+ experimental_invoice_request_tlv_stream.serialized_length()
 		);
 
 		payer_tlv_stream.write(&mut bytes).unwrap();
@@ -546,6 +547,7 @@ impl UnsignedInvoiceRequest {
 				.range(OFFER_TYPES)
 				.last()
 				.map_or(0, |last_record| last_record.end)
+			+ experimental_invoice_request_tlv_stream.serialized_length()
 		);
 
 		for record in TlvStream::new(&offer.bytes).range(EXPERIMENTAL_OFFER_TYPES) {
