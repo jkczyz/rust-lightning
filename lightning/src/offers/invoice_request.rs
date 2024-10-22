@@ -519,13 +519,17 @@ where
 
 impl UnsignedInvoiceRequest {
 	fn new(offer: &Offer, contents: InvoiceRequestContents) -> Self {
-		let mut bytes = Vec::new();
-
 		// Use the offer bytes instead of the offer TLV stream as the offer may have contained
 		// unknown TLV records, which are not stored in `OfferContents`.
 		let (
 			payer_tlv_stream, _offer_tlv_stream, invoice_request_tlv_stream,
 		) = contents.as_tlv_stream();
+
+		let mut bytes = Vec::with_capacity(
+			offer.bytes.len()
+			+ payer_tlv_stream.serialized_length()
+			+ invoice_request_tlv_stream.serialized_length()
+		);
 
 		payer_tlv_stream.write(&mut bytes).unwrap();
 
@@ -535,7 +539,13 @@ impl UnsignedInvoiceRequest {
 
 		invoice_request_tlv_stream.write(&mut bytes).unwrap();
 
-		let mut experimental_bytes = Vec::new();
+		let mut experimental_bytes = Vec::with_capacity(
+			offer.bytes.len()
+			- TlvStream::new(&offer.bytes)
+				.range(OFFER_TYPES)
+				.last()
+				.map_or(0, |last_record| last_record.end)
+		);
 
 		for record in TlvStream::new(&offer.bytes).range(EXPERIMENTAL_OFFER_TYPES) {
 			record.write(&mut experimental_bytes).unwrap();
