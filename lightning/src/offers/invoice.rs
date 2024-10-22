@@ -122,7 +122,7 @@ use crate::offers::invoice_macros::{invoice_accessors_common, invoice_builder_me
 #[cfg(test)]
 use crate::offers::invoice_macros::invoice_builder_methods_test;
 use crate::offers::invoice_request::{EXPERIMENTAL_INVOICE_REQUEST_TYPES, INVOICE_REQUEST_PAYER_ID_TYPE, INVOICE_REQUEST_TYPES, IV_BYTES as INVOICE_REQUEST_IV_BYTES, InvoiceRequest, InvoiceRequestContents, InvoiceRequestTlvStream, InvoiceRequestTlvStreamRef};
-use crate::offers::merkle::{SignError, SignFn, SignatureTlvStream, SignatureTlvStreamRef, TaggedHash, TlvStream, self};
+use crate::offers::merkle::{SIGNATURE_TYPES, SignError, SignFn, SignatureTlvStream, SignatureTlvStreamRef, TaggedHash, TlvStream, self};
 use crate::offers::nonce::Nonce;
 use crate::offers::offer::{Amount, EXPERIMENTAL_OFFER_TYPES, OFFER_TYPES, OfferTlvStream, OfferTlvStreamRef, Quantity};
 use crate::offers::parse::{Bolt12ParseError, Bolt12SemanticError, ParsedMessage};
@@ -497,7 +497,12 @@ impl UnsignedBolt12Invoice {
 		const EXPERIMENTAL_TYPES: core::ops::Range<u64> =
 			EXPERIMENTAL_OFFER_TYPES.start..EXPERIMENTAL_INVOICE_REQUEST_TYPES.end;
 
-		let mut bytes = Vec::new();
+		let (_, _, _, invoice_tlv_stream) = contents.as_tlv_stream();
+
+		let mut bytes = Vec::with_capacity(
+			invreq_bytes.len()
+			+ invoice_tlv_stream.serialized_length()
+		);
 
 		// Use the invoice_request bytes instead of the invoice_request TLV stream as the latter may
 		// have contained unknown TLV records, which are not stored in `InvoiceRequestContents` or
@@ -506,11 +511,15 @@ impl UnsignedBolt12Invoice {
 			record.write(&mut bytes).unwrap();
 		}
 
-		let (_, _, _, invoice_tlv_stream) = contents.as_tlv_stream();
-
 		invoice_tlv_stream.write(&mut bytes).unwrap();
 
-		let mut experimental_bytes = Vec::new();
+		let mut experimental_bytes = Vec::with_capacity(
+			invreq_bytes.len()
+			- TlvStream::new(invreq_bytes)
+				.range(SIGNATURE_TYPES)
+				.last()
+				.map_or(0, |last_record| last_record.end)
+		);
 
 		for record in TlvStream::new(invreq_bytes).range(EXPERIMENTAL_TYPES) {
 			record.write(&mut experimental_bytes).unwrap();
