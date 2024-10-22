@@ -503,6 +503,7 @@ impl UnsignedBolt12Invoice {
 		let mut bytes = Vec::with_capacity(
 			invreq_bytes.len()
 			+ invoice_tlv_stream.serialized_length()
+			+ experimental_invoice_tlv_stream.serialized_length()
 		);
 
 		// Use the invoice_request bytes instead of the invoice_request TLV stream as the latter may
@@ -520,6 +521,7 @@ impl UnsignedBolt12Invoice {
 				.range(SIGNATURE_TYPES)
 				.last()
 				.map_or(0, |last_record| last_record.end)
+			+ experimental_invoice_tlv_stream.serialized_length()
 		);
 
 		for record in TlvStream::new(invreq_bytes).range(EXPERIMENTAL_TYPES) {
