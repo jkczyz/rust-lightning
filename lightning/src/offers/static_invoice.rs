@@ -283,6 +283,7 @@ impl UnsignedStaticInvoice {
 		let mut bytes = Vec::with_capacity(
 			offer_bytes.len()
 			+ invoice_tlv_stream.serialized_length()
+			+ experimental_invoice_tlv_stream.serialized_length()
 		);
 
 		// Use the offer bytes instead of the offer TLV stream as the latter may have contained
@@ -299,6 +300,7 @@ impl UnsignedStaticInvoice {
 				.range(OFFER_TYPES)
 				.last()
 				.map_or(0, |last_record| last_record.end)
+			+ experimental_invoice_tlv_stream.serialized_length()
 		);
 
 		for record in TlvStream::new(offer_bytes).range(EXPERIMENTAL_OFFER_TYPES) {
