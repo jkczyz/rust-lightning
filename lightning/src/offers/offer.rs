@@ -1972,8 +1972,9 @@ mod tests {
 		BigSize(32).write(&mut encoded_offer).unwrap();
 		[42u8; 32].write(&mut encoded_offer).unwrap();
 
-		if let Err(e) = Offer::try_from(encoded_offer) {
-			panic!("error parsing offer: {:?}", e);
+		match Offer::try_from(encoded_offer.clone()) {
+			Ok(offer) => assert_eq!(offer.bytes, encoded_offer),
+			Err(e) => panic!("error parsing offer: {:?}", e),
 		}
 
 		let offer = OfferBuilder::new(pubkey(42)).build().unwrap();
