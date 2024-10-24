@@ -2526,8 +2526,9 @@ mod tests {
 		let mut encoded_invoice_request = Vec::new();
 		invoice_request.write(&mut encoded_invoice_request).unwrap();
 
-		if let Err(e) = InvoiceRequest::try_from(encoded_invoice_request) {
-			panic!("error parsing invoice_request: {:?}", e);
+		match InvoiceRequest::try_from(encoded_invoice_request.clone()) {
+			Ok(invoice_request) => assert_eq!(invoice_request.bytes, encoded_invoice_request),
+			Err(e) => panic!("error parsing invoice_request: {:?}", e),
 		}
 
 		const UNKNOWN_EVEN_TYPE: u64 = EXPERIMENTAL_INVOICE_REQUEST_TYPES.start;
