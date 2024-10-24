@@ -277,10 +277,6 @@ macro_rules! invoice_accessors_signing_pubkey {
 
 impl UnsignedStaticInvoice {
 	fn new(offer_bytes: &Vec<u8>, contents: InvoiceContents) -> Self {
-		// TLV record ranges applicable to offer_bytes.
-		const NON_EXPERIMENTAL_TYPES: core::ops::Range<u64> = OFFER_TYPES;
-		const EXPERIMENTAL_TYPES: core::ops::Range<u64> = EXPERIMENTAL_OFFER_TYPES;
-
 		let (_, invoice_tlv_stream) = contents.as_tlv_stream();
 
 		let mut bytes = Vec::with_capacity(
@@ -290,7 +286,7 @@ impl UnsignedStaticInvoice {
 
 		// Use the offer bytes instead of the offer TLV stream as the latter may have contained
 		// unknown TLV records, which are not stored in `InvoiceContents`.
-		for record in TlvStream::new(offer_bytes).range(NON_EXPERIMENTAL_TYPES) {
+		for record in TlvStream::new(offer_bytes).range(OFFER_TYPES) {
 			record.write(&mut bytes).unwrap();
 		}
 
@@ -304,7 +300,7 @@ impl UnsignedStaticInvoice {
 				.map_or(0, |last_record| last_record.end)
 		);
 
-		for record in TlvStream::new(offer_bytes).range(EXPERIMENTAL_TYPES) {
+		for record in TlvStream::new(offer_bytes).range(EXPERIMENTAL_OFFER_TYPES) {
 			record.write(&mut experimental_bytes).unwrap();
 		}
 
