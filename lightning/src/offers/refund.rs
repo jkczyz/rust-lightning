@@ -1535,8 +1535,9 @@ mod tests {
 		BigSize(32).write(&mut encoded_refund).unwrap();
 		[42u8; 32].write(&mut encoded_refund).unwrap();
 
-		if let Err(e) = Refund::try_from(encoded_refund) {
-			panic!("error parsing refund: {:?}", e);
+		match Refund::try_from(encoded_refund.clone()) {
+			Ok(refund) => assert_eq!(refund.bytes, encoded_refund),
+			Err(e) => panic!("error parsing refund: {:?}", e),
 		}
 
 		const UNKNOWN_EVEN_TYPE: u64 = INVOICE_REQUEST_TYPES.end - 2;

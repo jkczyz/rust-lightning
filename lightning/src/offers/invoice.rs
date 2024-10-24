@@ -2528,8 +2528,9 @@ mod tests {
 		let mut encoded_invoice = Vec::new();
 		invoice.write(&mut encoded_invoice).unwrap();
 
-		if let Err(e) = Bolt12Invoice::try_from(encoded_invoice) {
-			panic!("error parsing invoice: {:?}", e);
+		match Bolt12Invoice::try_from(encoded_invoice.clone()) {
+			Ok(invoice) => assert_eq!(invoice.bytes, encoded_invoice),
+			Err(e) => panic!("error parsing invoice: {:?}", e),
 		}
 
 		const UNKNOWN_EVEN_TYPE: u64 = INVOICE_TYPES.end - 2;
