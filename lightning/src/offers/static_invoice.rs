@@ -281,7 +281,12 @@ impl UnsignedStaticInvoice {
 		const NON_EXPERIMENTAL_TYPES: core::ops::Range<u64> = OFFER_TYPES;
 		const EXPERIMENTAL_TYPES: core::ops::Range<u64> = EXPERIMENTAL_OFFER_TYPES;
 
-		let mut bytes = Vec::new();
+		let (_, invoice_tlv_stream) = contents.as_tlv_stream();
+
+		let mut bytes = Vec::with_capacity(
+			offer_bytes.len()
+			+ invoice_tlv_stream.serialized_length()
+		);
 
 		// Use the offer bytes instead of the offer TLV stream as the latter may have contained
 		// unknown TLV records, which are not stored in `InvoiceContents`.
@@ -289,10 +294,15 @@ impl UnsignedStaticInvoice {
 			record.write(&mut bytes).unwrap();
 		}
 
-		let (_, invoice_tlv_stream) = contents.as_tlv_stream();
 		invoice_tlv_stream.write(&mut bytes).unwrap();
 
-		let mut experimental_bytes = Vec::new();
+		let mut experimental_bytes = Vec::with_capacity(
+			offer_bytes.len()
+			- TlvStream::new(&offer_bytes)
+				.range(OFFER_TYPES)
+				.last()
+				.map_or(0, |last_record| last_record.end)
+		);
 
 		for record in TlvStream::new(offer_bytes).range(EXPERIMENTAL_TYPES) {
 			record.write(&mut experimental_bytes).unwrap();
