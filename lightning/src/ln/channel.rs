@@ -2259,7 +2259,7 @@ impl<SP: Deref> PendingV2Channel<SP> where SP::Target: SignerProvider {
 		self.context.holder_signer.as_mut().provide_channel_parameters(&self.context.channel_transaction_parameters);
 
 		self.context.assert_no_commitment_advancement(transaction_number, "initial commitment_signed");
-		let commitment_signed = self.context.get_initial_commitment_signed(logger);
+		let commitment_signed = self.context_mut().get_initial_commitment_signed(logger);
 		let commitment_signed = match commitment_signed {
 			Ok(commitment_signed) => {
 				self.context.funding_transaction = Some(signing_session.unsigned_tx.build_unsigned_tx());
@@ -3424,7 +3424,14 @@ impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
 		!self.channel_state.is_pre_funded_state() &&
 			!matches!(self.channel_state, ChannelState::AwaitingChannelReady(flags) if flags.is_set(AwaitingChannelReadyFlags::WAITING_FOR_BATCH))
 	}
+}
 
+impl<C, F, SP: Deref> ScopedChannelContext<C, F, SP>
+where
+	C: Deref<Target = ChannelContext<SP>>,
+	F: Deref<Target = FundingScope>,
+	SP::Target: SignerProvider,
+{
 	/// Transaction nomenclature is somewhat confusing here as there are many different cases - a
 	/// transaction is referred to as "a's transaction" implying that a will be able to broadcast
 	/// the transaction. Thus, b will generally be sending a signature over such a transaction to
@@ -3595,7 +3602,7 @@ impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
 		// AwaitingRemoteRevokeToRemove or AwaitingRemovedRemoteRevoke) we may have allowed them to
 		// "violate" their reserve value by couting those against it. Thus, we have to convert
 		// everything to i64 before subtracting as otherwise we can overflow.
-		let value_to_remote_msat: i64 = (self.channel_value_satoshis * 1000) as i64 - (self.value_to_self_msat as i64) - (remote_htlc_total_msat as i64) - value_to_self_msat_offset;
+		let value_to_remote_msat: i64 = (self.channel_value_satoshis() * 1000) as i64 - (self.value_to_self_msat as i64) - (remote_htlc_total_msat as i64) - value_to_self_msat_offset;
 		assert!(value_to_remote_msat >= 0);
 
 		#[cfg(debug_assertions)]
@@ -3673,7 +3680,9 @@ impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
 			outbound_htlc_preimages,
 		}
 	}
+}
 
+impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
 	#[inline]
 	/// Creates a set of keys for build_commitment_transaction to generate a transaction which our
 	/// counterparty will sign (ie DO NOT send signatures over a transaction created by this to
@@ -4510,7 +4519,14 @@ impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
 				msg_name);
 		}
 	}
+}
 
+impl<C, F, SP: Deref> ScopedChannelContext<C, F, SP>
+where
+	C: Deref<Target = ChannelContext<SP>>,
+	F: Deref<Target = FundingScope>,
+	SP::Target: SignerProvider,
+{
 	fn get_initial_counterparty_commitment_signature<L: Deref>(
 		&self, logger: &L
 	) -> Result<Signature, ChannelError>
@@ -4537,7 +4553,14 @@ impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
 			_ => todo!(),
 		}
 	}
+}
 
+impl<C, F, SP: Deref> ScopedChannelContext<C, F, SP>
+where
+	C: DerefMut<Target = ChannelContext<SP>>,
+	F: DerefMut<Target = FundingScope>,
+	SP::Target: SignerProvider,
+{
 	fn get_initial_commitment_signed<L: Deref>(
 		&mut self, logger: &L
 	) -> Result<msgs::CommitmentSigned, ChannelError>
@@ -5527,7 +5550,8 @@ impl<SP: Deref> FundedChannel<SP> where
 
 		let keys = self.context.build_holder_transaction_keys(self.holder_commitment_point.current_point());
 
-		let commitment_stats = self.context.build_commitment_transaction(self.holder_commitment_point.transaction_number(), &keys, true, false, logger);
+		let funding_context = self.context();
+		let commitment_stats = funding_context.build_commitment_transaction(self.holder_commitment_point.transaction_number(), &keys, true, false, logger);
 		let commitment_txid = {
 			let trusted_tx = commitment_stats.tx.trust();
 			let bitcoin_tx = trusted_tx.built_transaction();
@@ -6279,7 +6303,8 @@ impl<SP: Deref> FundedChannel<SP> where
 		let dust_exposure_limiting_feerate = self.context.get_dust_exposure_limiting_feerate(&fee_estimator);
 		let htlc_stats = self.context.get_pending_htlc_stats(Some(feerate_per_kw), dust_exposure_limiting_feerate);
 		let keys = self.context.build_holder_transaction_keys(self.holder_commitment_point.current_point());
-		let commitment_stats = self.context.build_commitment_transaction(self.holder_commitment_point.transaction_number(), &keys, true, true, logger);
+		let funding_context = self.context();
+		let commitment_stats = funding_context.build_commitment_transaction(self.holder_commitment_point.transaction_number(), &keys, true, true, logger);
 		let buffer_fee_msat = commit_tx_fee_sat(feerate_per_kw, commitment_stats.num_nondust_htlcs + htlc_stats.on_holder_tx_outbound_holding_cell_htlcs_count as usize + CONCURRENT_INBOUND_HTLC_FEE_BUFFER as usize, self.context.get_channel_type()) * 1000;
 		let holder_balance_msat = commitment_stats.local_balance_msat - htlc_stats.outbound_holding_cell_msat;
 		if holder_balance_msat < buffer_fee_msat  + self.context.counterparty_selected_channel_reserve_satoshis.unwrap() * 1000 {
@@ -6580,7 +6605,7 @@ impl<SP: Deref> FundedChannel<SP> where
 		}
 		let funding_signed = if self.context.signer_pending_funding && !self.context.is_outbound() {
 			let counterparty_keys = self.context.build_remote_transaction_keys();
-			let counterparty_initial_commitment_tx = self.context.build_commitment_transaction(self.context.cur_counterparty_commitment_transaction_number + 1, &counterparty_keys, false, false, logger).tx;
+			let counterparty_initial_commitment_tx = self.context().build_commitment_transaction(self.context.cur_counterparty_commitment_transaction_number + 1, &counterparty_keys, false, false, logger).tx;
 			self.context.get_funding_signed_msg(logger, counterparty_initial_commitment_tx)
 		} else { None };
 		// Provide a `channel_ready` message if we need to, but only if we're _not_ still pending
@@ -8506,7 +8531,8 @@ impl<SP: Deref> FundedChannel<SP> where
 	where L::Target: Logger
 	{
 		let counterparty_keys = self.context.build_remote_transaction_keys();
-		let commitment_stats = self.context.build_commitment_transaction(self.context.cur_counterparty_commitment_transaction_number, &counterparty_keys, false, true, logger);
+		let funding_context = self.context();
+		let commitment_stats = funding_context.build_commitment_transaction(self.context.cur_counterparty_commitment_transaction_number, &counterparty_keys, false, true, logger);
 		let counterparty_commitment_tx = commitment_stats.tx;
 
 		#[cfg(any(test, fuzzing))]
@@ -8538,7 +8564,8 @@ impl<SP: Deref> FundedChannel<SP> where
 		self.build_commitment_no_state_update(logger);
 
 		let counterparty_keys = self.context.build_remote_transaction_keys();
-		let commitment_stats = self.context.build_commitment_transaction(self.context.cur_counterparty_commitment_transaction_number, &counterparty_keys, false, true, logger);
+		let funding_context = self.context();
+		let commitment_stats = funding_context.build_commitment_transaction(self.context.cur_counterparty_commitment_transaction_number, &counterparty_keys, false, true, logger);
 		let counterparty_commitment_txid = commitment_stats.tx.trust().txid();
 
 		match &self.context.holder_signer {
@@ -8815,7 +8842,7 @@ impl<SP: Deref> OutboundV1Channel<SP> where SP::Target: SignerProvider {
 	/// Only allowed after [`ChannelContext::channel_transaction_parameters`] is set.
 	fn get_funding_created_msg<L: Deref>(&mut self, logger: &L) -> Option<msgs::FundingCreated> where L::Target: Logger {
 		let counterparty_keys = self.context.build_remote_transaction_keys();
-		let counterparty_initial_commitment_tx = self.context.build_commitment_transaction(self.context.cur_counterparty_commitment_transaction_number, &counterparty_keys, false, false, logger).tx;
+		let counterparty_initial_commitment_tx = self.context().build_commitment_transaction(self.context.cur_counterparty_commitment_transaction_number, &counterparty_keys, false, false, logger).tx;
 		let signature = match &self.context.holder_signer {
 			// TODO (taproot|arik): move match into calling method for Taproot
 			ChannelSignerType::Ecdsa(ecdsa) => {
