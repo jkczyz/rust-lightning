@@ -15,7 +15,7 @@ use bitcoin::secp256k1::PublicKey;
 
 use crate::chain::chaininterface::{FeeEstimator, LowerBoundedFeeEstimator};
 use crate::chain::transaction::OutPoint;
-use crate::ln::channel::ChannelContext;
+use crate::ln::channel::{ChannelContext, FundingScope, ScopedChannelContext};
 use crate::ln::types::ChannelId;
 use crate::sign::SignerProvider;
 use crate::types::features::{ChannelTypeFeatures, InitFeatures};
@@ -476,7 +476,8 @@ impl ChannelDetails {
 	}
 
 	pub(super) fn from_channel_context<SP: Deref, F: Deref>(
-		context: &ChannelContext<SP>, best_block_height: u32, latest_features: InitFeatures,
+		context: ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP>,
+		best_block_height: u32, latest_features: InitFeatures,
 		fee_estimator: &LowerBoundedFeeEstimator<F>,
 	) -> Self
 	where
