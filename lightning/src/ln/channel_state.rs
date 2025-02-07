@@ -484,7 +484,7 @@ impl ChannelDetails {
 		SP::Target: SignerProvider,
 		F::Target: FeeEstimator,
 	{
-		let balance = context.get_available_balances(fee_estimator);
+		let balance = context.get_available_balances(&context.funding(), fee_estimator);
 		let (to_remote_reserve_satoshis, to_self_reserve_satoshis) =
 			context.get_holder_counterparty_selected_channel_reserve_satoshis();
 		#[allow(deprecated)] // TODO: Remove once balance_msat is removed.
@@ -522,7 +522,7 @@ impl ChannelDetails {
 				None
 			},
 			inbound_scid_alias: context.latest_inbound_scid_alias(),
-			channel_value_satoshis: context.get_value_satoshis(),
+			channel_value_satoshis: context.channel_value_satoshis(),
 			feerate_sat_per_1000_weight: Some(context.get_feerate_sat_per_1000_weight()),
 			unspendable_punishment_reserve: to_self_reserve_satoshis,
 			inbound_capacity_msat: balance.inbound_capacity_msat,
