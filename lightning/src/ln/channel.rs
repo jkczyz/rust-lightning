@@ -67,7 +67,7 @@ use crate::util::scid_utils::scid_from_parts;
 use crate::io;
 use crate::prelude::*;
 use core::{cmp,mem,fmt};
-use core::ops::Deref;
+use core::ops::{Deref, DerefMut};
 #[cfg(any(test, fuzzing, debug_assertions))]
 use crate::sync::Mutex;
 use crate::sign::type_resolver::ChannelSignerType;
@@ -760,10 +760,12 @@ impl<'a, L: Deref> Logger for WithChannelContext<'a, L> where L::Target: Logger 
 	}
 }
 
-impl<'a, 'b, L: Deref> WithChannelContext<'a, L>
+impl<'a, L: Deref> WithChannelContext<'a, L>
 where L::Target: Logger {
-	pub(super) fn from<S: Deref>(logger: &'a L, context: &'b ChannelContext<S>, payment_hash: Option<PaymentHash>) -> Self
-	where S::Target: SignerProvider
+	pub(super) fn from<C, S: Deref>(logger: &'a L, context: C, payment_hash: Option<PaymentHash>) -> Self
+	where
+		C: Deref<Target = ChannelContext<S>>,
+		S::Target: SignerProvider,
 	{
 		WithChannelContext {
 			logger,
@@ -1155,23 +1157,33 @@ impl<SP: Deref> Channel<SP> where
 	SP::Target: SignerProvider,
 	<SP::Target as SignerProvider>::EcdsaSigner: ChannelSigner,
 {
-	pub fn context(&self) -> &ChannelContext<SP> {
-		match &self.phase {
+	pub fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP> {
+		let (funding, context) = match &self.phase {
 			ChannelPhase::Undefined => unreachable!(),
-			ChannelPhase::Funded(chan) => &chan.context,
-			ChannelPhase::UnfundedOutboundV1(chan) => &chan.context,
-			ChannelPhase::UnfundedInboundV1(chan) => &chan.context,
-			ChannelPhase::UnfundedV2(chan) => &chan.context,
+			ChannelPhase::Funded(chan) => (&chan.funding, &chan.context),
+			ChannelPhase::UnfundedOutboundV1(chan) => (&chan.funding, &chan.context),
+			ChannelPhase::UnfundedInboundV1(chan) => (&chan.funding, &chan.context),
+			ChannelPhase::UnfundedV2(chan) => (&chan.funding, &chan.context),
+		};
+
+		ScopedChannelContext {
+			funding,
+			context,
 		}
 	}
 
-	pub fn context_mut(&mut self) -> &mut ChannelContext<SP> {
-		match &mut self.phase {
+	pub fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP> {
+		let (funding, context) = match &mut self.phase {
 			ChannelPhase::Undefined => unreachable!(),
-			ChannelPhase::Funded(chan) => &mut chan.context,
-			ChannelPhase::UnfundedOutboundV1(chan) => &mut chan.context,
-			ChannelPhase::UnfundedInboundV1(chan) => &mut chan.context,
-			ChannelPhase::UnfundedV2(chan) => &mut chan.context,
+			ChannelPhase::Funded(chan) => (&mut chan.funding, &mut chan.context),
+			ChannelPhase::UnfundedOutboundV1(chan) => (&mut chan.funding, &mut chan.context),
+			ChannelPhase::UnfundedInboundV1(chan) => (&mut chan.funding, &mut chan.context),
+			ChannelPhase::UnfundedV2(chan) => (&mut chan.funding, &mut chan.context),
+		};
+
+		ScopedChannelContext {
+			funding,
+			context,
 		}
 	}
 
@@ -1549,6 +1561,52 @@ impl UnfundedChannelContext {
 pub(super) struct FundingScope {
 }
 
+///
+pub(super) struct ScopedChannelContext<C, F, SP: Deref>
+where
+	C: Deref<Target = ChannelContext<SP>>,
+	F: Deref<Target = FundingScope>,
+	SP::Target: SignerProvider,
+{
+	funding: F,
+	context: C,
+}
+
+impl<C, F, SP: Deref> Deref for ScopedChannelContext<C, F, SP>
+where
+	C: Deref<Target = ChannelContext<SP>>,
+	F: Deref<Target = FundingScope>,
+	SP::Target: SignerProvider,
+{
+	type Target = ChannelContext<SP>;
+
+	fn deref(&self) -> &Self::Target {
+		&self.context
+	}
+}
+
+impl<C, F, SP: Deref> DerefMut for ScopedChannelContext<C, F, SP>
+where
+	C: DerefMut<Target = ChannelContext<SP>>,
+	F: DerefMut<Target = FundingScope>,
+	SP::Target: SignerProvider,
+{
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.context
+	}
+}
+
+impl<C, F, SP: Deref> ScopedChannelContext<C, F, SP>
+where
+	C: Deref<Target = ChannelContext<SP>>,
+	F: Deref<Target = FundingScope>,
+	SP::Target: SignerProvider,
+{
+	fn test(&self) -> u64 {
+		self.channel_value_satoshis
+	}
+}
+
 /// Contains everything about the channel including state, and various flags.
 pub(super) struct ChannelContext<SP: Deref> where SP::Target: SignerProvider {
 	config: LegacyChannelConfig,
@@ -1891,9 +1949,9 @@ pub(super) struct ChannelContext<SP: Deref> where SP::Target: SignerProvider {
 /// A channel struct implementing this trait can receive an initial counterparty commitment
 /// transaction signature.
 trait InitialRemoteCommitmentReceiver<SP: Deref> where SP::Target: SignerProvider {
-	fn context(&self) -> &ChannelContext<SP>;
+	fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP>;
 
-	fn context_mut(&mut self) -> &mut ChannelContext<SP>;
+	fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP>;
 
 	fn received_msg(&self) -> &'static str;
 
@@ -1939,7 +1997,7 @@ trait InitialRemoteCommitmentReceiver<SP: Deref> where SP::Target: SignerProvide
 				panic!("unexpected error type from check_counterparty_commitment_signature {:?}", e);
 			}
 		};
-		let context = self.context_mut();
+		let mut context = self.context_mut();
 		let counterparty_keys = context.build_remote_transaction_keys();
 		let counterparty_initial_commitment_tx = context.build_commitment_transaction(context.cur_counterparty_commitment_transaction_number, &counterparty_keys, false, false, logger).tx;
 		let counterparty_trusted_tx = counterparty_initial_commitment_tx.trust();
@@ -2011,12 +2069,19 @@ trait InitialRemoteCommitmentReceiver<SP: Deref> where SP::Target: SignerProvide
 }
 
 impl<SP: Deref> InitialRemoteCommitmentReceiver<SP> for OutboundV1Channel<SP> where SP::Target: SignerProvider {
-	fn context(&self) -> &ChannelContext<SP> {
-		&self.context
+
+	fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &self.funding,
+			context: &self.context,
+		}
 	}
 
-	fn context_mut(&mut self) -> &mut ChannelContext<SP> {
-		&mut self.context
+	fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &mut self.funding,
+			context: &mut self.context,
+		}
 	}
 
 	fn received_msg(&self) -> &'static str {
@@ -2025,12 +2090,18 @@ impl<SP: Deref> InitialRemoteCommitmentReceiver<SP> for OutboundV1Channel<SP> wh
 }
 
 impl<SP: Deref> InitialRemoteCommitmentReceiver<SP> for InboundV1Channel<SP> where SP::Target: SignerProvider {
-	fn context(&self) -> &ChannelContext<SP> {
-		&self.context
+	fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &self.funding,
+			context: &self.context,
+		}
 	}
 
-	fn context_mut(&mut self) -> &mut ChannelContext<SP> {
-		&mut self.context
+	fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &mut self.funding,
+			context: &mut self.context,
+		}
 	}
 
 	fn received_msg(&self) -> &'static str {
@@ -2039,12 +2110,18 @@ impl<SP: Deref> InitialRemoteCommitmentReceiver<SP> for InboundV1Channel<SP> whe
 }
 
 impl<SP: Deref> InitialRemoteCommitmentReceiver<SP> for FundedChannel<SP> where SP::Target: SignerProvider {
-	fn context(&self) -> &ChannelContext<SP> {
-		&self.context
+	fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &self.funding,
+			context: &self.context,
+		}
 	}
 
-	fn context_mut(&mut self) -> &mut ChannelContext<SP> {
-		&mut self.context
+	fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &mut self.funding,
+			context: &mut self.context,
+		}
 	}
 
 	fn received_msg(&self) -> &'static str {
@@ -4646,6 +4723,20 @@ impl<SP: Deref> FundedChannel<SP> where
 	SP::Target: SignerProvider,
 	<SP::Target as SignerProvider>::EcdsaSigner: EcdsaChannelSigner
 {
+	pub fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &self.funding,
+			context: &self.context,
+		}
+	}
+
+	pub fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &mut self.funding,
+			context: &mut self.context,
+		}
+	}
+
 	fn check_remote_fee<F: Deref, L: Deref>(
 		channel_type: &ChannelTypeFeatures, fee_estimator: &LowerBoundedFeeEstimator<F>,
 		feerate_per_kw: u32, cur_feerate_per_kw: Option<u32>, logger: &L
@@ -8598,6 +8689,20 @@ pub(super) struct OutboundV1Channel<SP: Deref> where SP::Target: SignerProvider 
 }
 
 impl<SP: Deref> OutboundV1Channel<SP> where SP::Target: SignerProvider {
+	pub fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &self.funding,
+			context: &self.context,
+		}
+	}
+
+	pub fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &mut self.funding,
+			context: &mut self.context,
+		}
+	}
+
 	#[allow(dead_code)] // TODO(dual_funding): Remove once opending V2 channels is enabled.
 	pub fn new<ES: Deref, F: Deref, L: Deref>(
 		fee_estimator: &LowerBoundedFeeEstimator<F>, entropy_source: &ES, signer_provider: &SP, counterparty_node_id: PublicKey, their_features: &InitFeatures,
@@ -8929,6 +9034,20 @@ pub(super) fn channel_type_from_open_channel(
 }
 
 impl<SP: Deref> InboundV1Channel<SP> where SP::Target: SignerProvider {
+	pub fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &self.funding,
+			context: &self.context,
+		}
+	}
+
+	pub fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &mut self.funding,
+			context: &mut self.context,
+		}
+	}
+
 	/// Creates a new channel from a remote sides' request for one.
 	/// Assumes chain_hash has already been checked and corresponds with what we expect!
 	pub fn new<ES: Deref, F: Deref, L: Deref>(
@@ -9156,6 +9275,20 @@ pub(super) struct PendingV2Channel<SP: Deref> where SP::Target: SignerProvider {
 }
 
 impl<SP: Deref> PendingV2Channel<SP> where SP::Target: SignerProvider {
+	pub fn context(&self) -> ScopedChannelContext<&ChannelContext<SP>, &FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &self.funding,
+			context: &self.context,
+		}
+	}
+
+	pub fn context_mut(&mut self) -> ScopedChannelContext<&mut ChannelContext<SP>, &mut FundingScope, SP> {
+		ScopedChannelContext {
+			funding: &mut self.funding,
+			context: &mut self.context,
+		}
+	}
+
 	#[allow(dead_code)] // TODO(dual_funding): Remove once creating V2 channels is enabled.
 	pub fn new_outbound<ES: Deref, F: Deref, L: Deref>(
 		fee_estimator: &LowerBoundedFeeEstimator<F>, entropy_source: &ES, signer_provider: &SP,
