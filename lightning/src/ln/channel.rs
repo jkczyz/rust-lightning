@@ -764,13 +764,13 @@ impl<'a, L: Deref> WithChannelContext<'a, L>
 where L::Target: Logger {
 	pub(super) fn from<C, S: Deref>(logger: &'a L, context: C, payment_hash: Option<PaymentHash>) -> Self
 	where
-		C: Deref<Target = ChannelContext<S>>,
+		C: AsRef<ChannelContext<S>>,
 		S::Target: SignerProvider,
 	{
 		WithChannelContext {
 			logger,
-			peer_id: Some(context.counterparty_node_id),
-			channel_id: Some(context.channel_id),
+			peer_id: Some(context.as_ref().counterparty_node_id),
+			channel_id: Some(context.as_ref().channel_id),
 			payment_hash
 		}
 	}
@@ -1593,6 +1593,26 @@ where
 {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.context
+	}
+}
+
+impl<C, F, SP: Deref> AsRef<ChannelContext<SP>> for ScopedChannelContext<C, F, SP>
+where
+	C: Deref<Target = ChannelContext<SP>>,
+	F: Deref<Target = FundingScope>,
+	SP::Target: SignerProvider,
+{
+	fn as_ref(&self) -> &ChannelContext<SP> {
+		self.context.deref()
+	}
+}
+
+impl<SP: Deref> AsRef<ChannelContext<SP>> for ChannelContext<SP>
+where
+	SP::Target: SignerProvider,
+{
+	fn as_ref(&self) -> &ChannelContext<SP> {
+		self
 	}
 }
 

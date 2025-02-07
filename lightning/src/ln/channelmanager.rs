@@ -3728,7 +3728,7 @@ where
 					.filter_map(|(chan_id, chan)| chan.as_funded().map(|chan| (chan_id, chan)))
 					.filter(f)
 					.map(|(_channel_id, channel)| {
-						ChannelDetails::from_channel_context(&channel.context, best_block_height,
+						ChannelDetails::from_channel_context(channel.context(), best_block_height,
 							peer_state.latest_features.clone(), &self.fee_estimator)
 					})
 				);
@@ -6541,8 +6541,8 @@ where
 								chan.context_mut().maybe_expire_prev_config();
 								let unfunded_context = chan.unfunded_context_mut().expect("channel should be unfunded");
 								if unfunded_context.should_expire_unfunded_channel() {
-									let context = chan.context_mut();
-									let logger = WithChannelContext::from(&self.logger, context, None);
+									let mut context = chan.context_mut();
+									let logger = WithChannelContext::from(&self.logger, &context, None);
 									log_error!(logger,
 										"Force-closing pending channel with ID {} for not establishing in a timely manner",
 										context.channel_id());
@@ -8551,8 +8551,8 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 						}
 					},
 					None => {
-						let context = chan_entry.get_mut().context_mut();
-						let logger = WithChannelContext::from(&self.logger, context, None);
+						let mut context = chan_entry.get_mut().context_mut();
+						let logger = WithChannelContext::from(&self.logger, &context, None);
 						log_error!(logger, "Immediately closing unfunded channel {} as peer asked to cooperatively shut it down (which is unnecessary)", &msg.channel_id);
 						let mut close_res = context.force_shutdown(false, ClosureReason::CounterpartyCoopClosedUnfundedChannel);
 						remove_channel_entry!(self, peer_state, chan_entry, close_res);
@@ -9497,8 +9497,8 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 					_ => unblock_chan(chan, &mut peer_state.pending_msg_events),
 				};
 				if let Some(mut shutdown_result) = shutdown_result {
-					let context = &chan.context();
-					let logger = WithChannelContext::from(&self.logger, context, None);
+					let context = chan.context();
+					let logger = WithChannelContext::from(&self.logger, &context, None);
 					log_trace!(logger, "Removing channel {} now that the signer is unblocked", context.channel_id());
 					locked_close_channel!(self, peer_state, context, shutdown_result);
 					shutdown_results.push(shutdown_result);
@@ -11534,7 +11534,7 @@ where
 						return true;
 					}
 					// Clean up for removal.
-					let context = chan.context_mut();
+					let mut context = chan.context_mut();
 					let mut close_res = context.force_shutdown(false, ClosureReason::DisconnectedPeer);
 					locked_close_channel!(self, peer_state, &context, close_res);
 					failed_channels.push(close_res);
