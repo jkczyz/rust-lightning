@@ -2836,12 +2836,10 @@ impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
 	}
 }
 
-impl<SP: Deref> FundedChannel<SP>
-where
-	SP::Target: SignerProvider,
-	<SP::Target as SignerProvider>::EcdsaSigner: EcdsaChannelSigner,
-{
-	pub(crate) fn get_value_to_self_msat(&self) -> u64 {self.funding.value_to_self_msat}
+impl FundingScope {
+	pub(crate) fn get_value_to_self_msat(&self) -> u64 {
+		self.value_to_self_msat
+	}
 }
 
 impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
