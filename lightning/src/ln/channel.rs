@@ -10943,12 +10943,12 @@ mod tests {
 		// `holder_max_htlc_value_in_flight_msat`, when configured with a valid percentage value,
 		// which is set to the lower bound + 1 (2%) of the `channel_value`.
 		let mut chan_1 = OutboundV1Channel::<&TestKeysInterface>::new(&feeest, &&keys_provider, &&keys_provider, outbound_node_id, &channelmanager::provided_init_features(&config_2_percent), 10000000, 100000, 42, &config_2_percent, 0, 42, None, &logger).unwrap();
-		let chan_1_value_msat = chan_1.context.channel_value_satoshis * 1000;
+		let chan_1_value_msat = chan_1.funding.channel_value_satoshis * 1000;
 		assert_eq!(chan_1.context.holder_max_htlc_value_in_flight_msat, (chan_1_value_msat as f64 * 0.02) as u64);
 
 		// Test with the upper bound - 1 of valid values (99%).
 		let chan_2 = OutboundV1Channel::<&TestKeysInterface>::new(&feeest, &&keys_provider, &&keys_provider, outbound_node_id, &channelmanager::provided_init_features(&config_99_percent), 10000000, 100000, 42, &config_99_percent, 0, 42, None, &logger).unwrap();
-		let chan_2_value_msat = chan_2.context.channel_value_satoshis * 1000;
+		let chan_2_value_msat = chan_2.funding.channel_value_satoshis * 1000;
 		assert_eq!(chan_2.context.holder_max_htlc_value_in_flight_msat, (chan_2_value_msat as f64 * 0.99) as u64);
 
 		let chan_1_open_channel_msg = chan_1.get_open_channel(ChainHash::using_genesis_block(network), &&logger).unwrap();
@@ -10957,38 +10957,38 @@ mod tests {
 		// `holder_max_htlc_value_in_flight_msat`, when configured with a valid percentage value,
 		// which is set to the lower bound - 1 (2%) of the `channel_value`.
 		let chan_3 = InboundV1Channel::<&TestKeysInterface>::new(&feeest, &&keys_provider, &&keys_provider, inbound_node_id, &channelmanager::provided_channel_type_features(&config_2_percent), &channelmanager::provided_init_features(&config_2_percent), &chan_1_open_channel_msg, 7, &config_2_percent, 0, &&logger, /*is_0conf=*/false).unwrap();
-		let chan_3_value_msat = chan_3.context.channel_value_satoshis * 1000;
+		let chan_3_value_msat = chan_3.funding.channel_value_satoshis * 1000;
 		assert_eq!(chan_3.context.holder_max_htlc_value_in_flight_msat, (chan_3_value_msat as f64 * 0.02) as u64);
 
 		// Test with the upper bound - 1 of valid values (99%).
 		let chan_4 = InboundV1Channel::<&TestKeysInterface>::new(&feeest, &&keys_provider, &&keys_provider, inbound_node_id, &channelmanager::provided_channel_type_features(&config_99_percent), &channelmanager::provided_init_features(&config_99_percent), &chan_1_open_channel_msg, 7, &config_99_percent, 0, &&logger, /*is_0conf=*/false).unwrap();
-		let chan_4_value_msat = chan_4.context.channel_value_satoshis * 1000;
+		let chan_4_value_msat = chan_4.funding.channel_value_satoshis * 1000;
 		assert_eq!(chan_4.context.holder_max_htlc_value_in_flight_msat, (chan_4_value_msat as f64 * 0.99) as u64);
 
 		// Test that `OutboundV1Channel::new` uses the lower bound of the configurable percentage values (1%)
 		// if `max_inbound_htlc_value_in_flight_percent_of_channel` is set to a value less than 1.
 		let chan_5 = OutboundV1Channel::<&TestKeysInterface>::new(&feeest, &&keys_provider, &&keys_provider, outbound_node_id, &channelmanager::provided_init_features(&config_0_percent), 10000000, 100000, 42, &config_0_percent, 0, 42, None, &logger).unwrap();
-		let chan_5_value_msat = chan_5.context.channel_value_satoshis * 1000;
+		let chan_5_value_msat = chan_5.funding.channel_value_satoshis * 1000;
 		assert_eq!(chan_5.context.holder_max_htlc_value_in_flight_msat, (chan_5_value_msat as f64 * 0.01) as u64);
 
 		// Test that `OutboundV1Channel::new` uses the upper bound of the configurable percentage values
 		// (100%) if `max_inbound_htlc_value_in_flight_percent_of_channel` is set to a larger value
 		// than 100.
 		let chan_6 = OutboundV1Channel::<&TestKeysInterface>::new(&feeest, &&keys_provider, &&keys_provider, outbound_node_id, &channelmanager::provided_init_features(&config_101_percent), 10000000, 100000, 42, &config_101_percent, 0, 42, None, &logger).unwrap();
-		let chan_6_value_msat = chan_6.context.channel_value_satoshis * 1000;
+		let chan_6_value_msat = chan_6.funding.channel_value_satoshis * 1000;
 		assert_eq!(chan_6.context.holder_max_htlc_value_in_flight_msat, chan_6_value_msat);
 
 		// Test that `InboundV1Channel::new` uses the lower bound of the configurable percentage values (1%)
 		// if `max_inbound_htlc_value_in_flight_percent_of_channel` is set to a value less than 1.
 		let chan_7 = InboundV1Channel::<&TestKeysInterface>::new(&feeest, &&keys_provider, &&keys_provider, inbound_node_id, &channelmanager::provided_channel_type_features(&config_0_percent), &channelmanager::provided_init_features(&config_0_percent), &chan_1_open_channel_msg, 7, &config_0_percent, 0, &&logger, /*is_0conf=*/false).unwrap();
-		let chan_7_value_msat = chan_7.context.channel_value_satoshis * 1000;
+		let chan_7_value_msat = chan_7.funding.channel_value_satoshis * 1000;
 		assert_eq!(chan_7.context.holder_max_htlc_value_in_flight_msat, (chan_7_value_msat as f64 * 0.01) as u64);
 
 		// Test that `InboundV1Channel::new` uses the upper bound of the configurable percentage values
 		// (100%) if `max_inbound_htlc_value_in_flight_percent_of_channel` is set to a larger value
 		// than 100.
 		let chan_8 = InboundV1Channel::<&TestKeysInterface>::new(&feeest, &&keys_provider, &&keys_provider, inbound_node_id, &channelmanager::provided_channel_type_features(&config_101_percent), &channelmanager::provided_init_features(&config_101_percent), &chan_1_open_channel_msg, 7, &config_101_percent, 0, &&logger, /*is_0conf=*/false).unwrap();
-		let chan_8_value_msat = chan_8.context.channel_value_satoshis * 1000;
+		let chan_8_value_msat = chan_8.funding.channel_value_satoshis * 1000;
 		assert_eq!(chan_8.context.holder_max_htlc_value_in_flight_msat, chan_8_value_msat);
 	}
 
