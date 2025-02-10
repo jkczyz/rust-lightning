@@ -3228,7 +3228,6 @@ impl<SP: Deref> ChannelContext<SP> where SP::Target: SignerProvider {
 }
 
 impl FundingScope {
-	// CHANGES
 	pub fn get_value_satoshis(&self) -> u64 {
 		self.channel_value_satoshis
 	}
