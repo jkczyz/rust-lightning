@@ -368,7 +368,10 @@ impl<'a, 'b, ES: EntropySource, SP: SignerProvider> ReadableArgs<(&'a ES, &'b SP
 		let prev_holder_commitment = Readable::read(reader)?;
 		let _prev_holder_htlc_sigs: Option<Vec<Option<(usize, Signature)>>> = Readable::read(reader)?;
 
-		let channel_parameters = Readable::read(reader)?;
+		// ChannelTransactionParameters::channel_value_satoshis defaults to 0 prior to version 0.2.
+		let mut channel_parameters: ChannelTransactionParameters = Readable::read(reader)?;
+		channel_parameters.channel_value_satoshis = channel_value_satoshis;
+
 
 		// Read the serialized signer bytes, but don't deserialize them, as we'll obtain our signer
 		// by re-deriving the private key material.
@@ -1355,6 +1358,7 @@ mod tests {
 			}),
 			funding_outpoint: Some(funding_outpoint),
 			channel_type_features: ChannelTypeFeatures::only_static_remote_key(),
+			channel_value_satoshis: 0,
 		};
 
 		// Create an OnchainTxHandler for a commitment containing HTLCs with CLTV expiries of 0, 1,
@@ -1374,7 +1378,7 @@ mod tests {
 				(),
 			));
 		}
-		let holder_commit = HolderCommitmentTransaction::dummy(&mut htlcs);
+		let holder_commit = HolderCommitmentTransaction::dummy(1000000, &mut htlcs);
 		let mut tx_handler = OnchainTxHandler::new(
 			1000000,
 			[0; 32],
