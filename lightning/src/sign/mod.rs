@@ -1696,7 +1696,8 @@ impl EcdsaChannelSigner for InMemorySigner {
 	}
 
 	fn sign_channel_announcement_with_funding_key(
-		&self, msg: &UnsignedChannelAnnouncement, secp_ctx: &Secp256k1<secp256k1::All>,
+		&self, _channel_parameters: &ChannelTransactionParameters,
+		msg: &UnsignedChannelAnnouncement, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<Signature, ()> {
 		let msghash = hash_to_message!(&Sha256dHash::hash(&msg.encode()[..])[..]);
 		Ok(secp_ctx.sign_ecdsa(&msghash, &self.funding_key))

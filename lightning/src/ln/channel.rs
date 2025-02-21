@@ -8004,7 +8004,8 @@ impl<SP: Deref> FundedChannel<SP> where
 		};
 		match &self.context.holder_signer {
 			ChannelSignerType::Ecdsa(ecdsa) => {
-				let our_bitcoin_sig = match ecdsa.sign_channel_announcement_with_funding_key(&announcement, &self.context.secp_ctx) {
+				let channel_parameters = &self.funding.channel_transaction_parameters;
+				let our_bitcoin_sig = match ecdsa.sign_channel_announcement_with_funding_key(channel_parameters, &announcement, &self.context.secp_ctx) {
 					Err(_) => {
 						log_error!(logger, "Signer rejected channel_announcement signing. Channel will not be announced!");
 						return None;
@@ -8045,7 +8046,8 @@ impl<SP: Deref> FundedChannel<SP> where
 				.map_err(|_| ChannelError::Ignore("Failed to generate node signature for channel_announcement".to_owned()))?;
 			match &self.context.holder_signer {
 				ChannelSignerType::Ecdsa(ecdsa) => {
-					let our_bitcoin_sig = ecdsa.sign_channel_announcement_with_funding_key(&announcement, &self.context.secp_ctx)
+					let channel_parameters = &self.funding.channel_transaction_parameters;
+					let our_bitcoin_sig = ecdsa.sign_channel_announcement_with_funding_key(channel_parameters, &announcement, &self.context.secp_ctx)
 						.map_err(|_| ChannelError::Ignore("Signer rejected channel_announcement".to_owned()))?;
 					Ok(msgs::ChannelAnnouncement {
 						node_signature_1: if were_node_one { our_node_sig } else { their_node_sig },
