@@ -1223,13 +1223,12 @@ impl InMemorySigner {
 			return Err(());
 		}
 
-		let remotepubkey = bitcoin::PublicKey::new(self.pubkeys().payment_point);
-		// We cannot always assume that `channel_parameters` is set, so can't just call
-		// `self.channel_parameters()` or anything that relies on it
-		let supports_anchors_zero_fee_htlc_tx = self
-			.channel_type_features()
-			.map(|features| features.supports_anchors_zero_fee_htlc_tx())
-			.unwrap_or(false);
+		// TODO: Is this ok?
+		let channel_parameters =
+			descriptor.channel_transaction_parameters.as_ref().expect(MISSING_PARAMS_ERR);
+		let remotepubkey = bitcoin::PublicKey::new(channel_parameters.holder_pubkeys.payment_point);
+		let supports_anchors_zero_fee_htlc_tx =
+			channel_parameters.channel_type_features.supports_anchors_zero_fee_htlc_tx();
 
 		let witness_script = if supports_anchors_zero_fee_htlc_tx {
 			chan_utils::get_to_countersignatory_with_anchors_redeemscript(&remotepubkey.inner)
