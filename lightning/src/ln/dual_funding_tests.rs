@@ -24,7 +24,6 @@ use {
 	crate::ln::msgs::{CommitmentSigned, TxAddInput, TxAddOutput, TxComplete},
 	crate::ln::types::ChannelId,
 	crate::prelude::*,
-	crate::sign::ChannelSigner as _,
 	crate::util::ser::TransactionU16LenLimited,
 	crate::util::test_utils,
 };
@@ -145,7 +144,7 @@ fn do_test_v2_channel_establishment(
 		(channel_funding.get_funding_txo(), channel_context.get_channel_type().clone())
 	};
 
-	let channel_transaction_parameters = ChannelTransactionParameters {
+	channel.funding.channel_transaction_parameters = ChannelTransactionParameters {
 		counterparty_parameters: Some(CounterpartyChannelTransactionParameters {
 			pubkeys: ChannelPublicKeys {
 				funding_pubkey: accept_channel_v2_msg.common_fields.funding_pubkey,
@@ -178,13 +177,6 @@ fn do_test_v2_channel_establishment(
 		channel_value_satoshis: funding_satoshis,
 	};
 
-	channel
-		.context
-		.get_mut_signer()
-		.as_mut_ecdsa()
-		.unwrap()
-		.provide_channel_parameters(&channel_transaction_parameters);
-
 	let msg_commitment_signed_from_0 = CommitmentSigned {
 		channel_id,
 		signature: channel
@@ -192,7 +184,6 @@ fn do_test_v2_channel_establishment(
 			.get_initial_counterparty_commitment_signature_for_test(
 				&mut channel.funding,
 				&&logger_a,
-				channel_transaction_parameters,
 				accept_channel_v2_msg.common_fields.first_per_commitment_point,
 			)
 			.unwrap(),
