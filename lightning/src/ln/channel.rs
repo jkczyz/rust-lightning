@@ -9767,6 +9767,13 @@ where
 		self.context.latest_inbound_scid_alias.or(self.funding.get_short_channel_id())
 	}
 
+	/// Returns true if their channel_ready has been received
+	#[cfg(splicing)]
+	pub fn is_their_channel_ready(&self) -> bool {
+		matches!(self.context.channel_state, ChannelState::AwaitingChannelReady(flags) if flags.is_set(AwaitingChannelReadyFlags::THEIR_CHANNEL_READY))
+			|| matches!(self.context.channel_state, ChannelState::ChannelReady(_))
+	}
+
 	/// Returns true if our channel_ready has been sent
 	pub fn is_our_channel_ready(&self) -> bool {
 		matches!(self.context.channel_state, ChannelState::AwaitingChannelReady(flags) if flags.is_set(AwaitingChannelReadyFlags::OUR_CHANNEL_READY))
@@ -10541,6 +10548,35 @@ where
 		}
 	}
 
+	#[cfg(splicing)]
+	fn maybe_get_your_last_funding_locked_txid(&self) -> Option<Txid> {
+		self.pending_splice
+			.as_ref()
+			.and_then(|pending_splice| pending_splice.received_funding_txid)
+			.or_else(|| {
+				self.is_their_channel_ready().then(|| self.funding.get_funding_txid()).flatten()
+			})
+	}
+	#[cfg(not(splicing))]
+	fn maybe_get_your_last_funding_locked_txid(&self) -> Option<Txid> {
+		None
+	}
+
+	#[cfg(splicing)]
+	fn maybe_get_my_current_funding_locked_txid(&self) -> Option<Txid> {
+		self.pending_splice
+			.as_ref()
+			.and_then(|pending_splice| pending_splice.sent_funding_txid)
+			.or_else(|| {
+				self.is_our_channel_ready().then(|| self.funding.get_funding_txid()).flatten()
+			})
+	}
+
+	#[cfg(not(splicing))]
+	fn maybe_get_my_current_funding_locked_txid(&self) -> Option<Txid> {
+		None
+	}
+
 	/// May panic if called on a channel that wasn't immediately-previously
 	/// self.remove_uncommitted_htlcs_and_mark_paused()'d
 	#[rustfmt::skip]
@@ -10592,8 +10628,8 @@ where
 			your_last_per_commitment_secret: remote_last_secret,
 			my_current_per_commitment_point: dummy_pubkey,
 			next_funding_txid: self.maybe_get_next_funding_txid(),
-			your_last_funding_locked_txid: None,
-			my_current_funding_locked_txid: None,
+			your_last_funding_locked_txid: self.maybe_get_your_last_funding_locked_txid(),
+			my_current_funding_locked_txid: self.maybe_get_my_current_funding_locked_txid(),
 		}
 	}
 
