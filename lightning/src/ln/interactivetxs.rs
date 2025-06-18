@@ -187,7 +187,7 @@ impl Display for AbortReason {
 pub(crate) struct ConstructedTransaction {
 	holder_is_initiator: bool,
 
-	inputs: Vec<InteractiveTxInput>,
+	inputs: Vec<NegotiatedTxInput>,
 	outputs: Vec<InteractiveTxOutput>,
 
 	local_inputs_value_satoshis: u64,
@@ -199,6 +199,19 @@ pub(crate) struct ConstructedTransaction {
 	lock_time: AbsoluteLockTime,
 	holder_sends_tx_signatures_first: bool,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NegotiatedTxInput {
+	serial_id: SerialId,
+	txin: TxIn,
+	prev_output: TxOut,
+}
+
+impl_writeable_tlv_based!(NegotiatedTxInput, {
+	(1, serial_id, required),
+	(3, txin, required),
+	(5, prev_output, required),
+});
 
 impl_writeable_tlv_based!(ConstructedTransaction, {
 	(1, holder_is_initiator, required),
@@ -226,10 +239,25 @@ impl ConstructedTransaction {
 
 		let remote_inputs_value_satoshis = context.remote_inputs_value();
 		let remote_outputs_value_satoshis = context.remote_outputs_value();
-		let mut inputs: Vec<InteractiveTxInput> = context.inputs.into_values().collect();
+		let mut inputs: Vec<NegotiatedTxInput> = context
+			.inputs
+			.into_values()
+			.map(|tx_input| match tx_input.input {
+				InputOwned::Single(single) => NegotiatedTxInput {
+					serial_id: tx_input.serial_id,
+					txin: single.input,
+					prev_output: single.prev_output,
+				},
+				InputOwned::Shared(shared) => NegotiatedTxInput {
+					serial_id: tx_input.serial_id,
+					txin: shared.input,
+					prev_output: shared.prev_output,
+				},
+			})
+			.collect();
 		let mut outputs: Vec<InteractiveTxOutput> = context.outputs.into_values().collect();
 		// Inputs and outputs must be sorted by serial_id
-		inputs.sort_unstable_by_key(|input| input.serial_id());
+		inputs.sort_unstable_by_key(|input| input.serial_id);
 		outputs.sort_unstable_by_key(|output| output.serial_id);
 
 		// There is a strict ordering for `tx_signatures` exchange to prevent deadlocks.
@@ -262,7 +290,7 @@ impl ConstructedTransaction {
 
 	pub fn weight(&self) -> Weight {
 		let inputs_weight = self.inputs.iter().fold(Weight::from_wu(0), |weight, input| {
-			weight.checked_add(estimate_input_weight(input.prev_output())).unwrap_or(Weight::MAX)
+			weight.checked_add(estimate_input_weight(&input.prev_output)).unwrap_or(Weight::MAX)
 		});
 		let outputs_weight = self.outputs.iter().fold(Weight::from_wu(0), |weight, output| {
 			weight.checked_add(get_output_weight(output.script_pubkey())).unwrap_or(Weight::MAX)
@@ -276,7 +304,7 @@ impl ConstructedTransaction {
 	pub fn build_unsigned_tx(&self) -> Transaction {
 		let ConstructedTransaction { inputs, outputs, .. } = self;
 
-		let input: Vec<TxIn> = inputs.iter().map(|input| input.txin().clone()).collect();
+		let input: Vec<TxIn> = inputs.iter().map(|input| input.txin.clone()).collect();
 		let output: Vec<TxOut> = outputs.iter().map(|output| output.tx_out().clone()).collect();
 
 		Transaction { version: Version::TWO, lock_time: self.lock_time, input, output }
@@ -286,7 +314,7 @@ impl ConstructedTransaction {
 		self.outputs.iter()
 	}
 
-	pub fn inputs(&self) -> impl Iterator<Item = &InteractiveTxInput> {
+	pub fn inputs(&self) -> impl Iterator<Item = &NegotiatedTxInput> {
 		self.inputs.iter()
 	}
 
@@ -301,11 +329,10 @@ impl ConstructedTransaction {
 		self.inputs
 			.iter_mut()
 			.filter(|input| {
-				!is_serial_id_valid_for_counterparty(self.holder_is_initiator, input.serial_id())
+				!is_serial_id_valid_for_counterparty(self.holder_is_initiator, input.serial_id)
 			})
-			.map(|input| input.txin_mut())
 			.zip(witnesses)
-			.for_each(|(input, witness)| input.witness = witness);
+			.for_each(|(input, witness)| input.txin.witness = witness);
 	}
 
 	/// Adds counterparty witnesses to counterparty inputs of unsigned transaction.
@@ -315,11 +342,10 @@ impl ConstructedTransaction {
 		self.inputs
 			.iter_mut()
 			.filter(|input| {
-				is_serial_id_valid_for_counterparty(self.holder_is_initiator, input.serial_id())
+				is_serial_id_valid_for_counterparty(self.holder_is_initiator, input.serial_id)
 			})
-			.map(|input| input.txin_mut())
 			.zip(witnesses)
-			.for_each(|(input, witness)| input.witness = witness);
+			.for_each(|(input, witness)| input.txin.witness = witness);
 	}
 }
 
@@ -430,7 +456,7 @@ impl InteractiveTxSigningSession {
 			.filter(|input| {
 				is_serial_id_valid_for_counterparty(
 					self.unsigned_tx.holder_is_initiator,
-					input.serial_id(),
+					input.serial_id,
 				)
 			})
 			.count()
@@ -443,7 +469,7 @@ impl InteractiveTxSigningSession {
 			.filter(|input| {
 				!is_serial_id_valid_for_counterparty(
 					self.unsigned_tx.holder_is_initiator,
-					input.serial_id(),
+					input.serial_id,
 				)
 			})
 			.count()
@@ -456,7 +482,7 @@ impl InteractiveTxSigningSession {
 		Transaction {
 			version: Version::TWO,
 			lock_time,
-			input: inputs.iter().cloned().map(|input| input.into_txin()).collect(),
+			input: inputs.iter().cloned().map(|input| input.txin).collect(),
 			output: outputs.iter().cloned().map(|output| output.into_tx_out()).collect(),
 		}
 	}
@@ -974,7 +1000,7 @@ impl NegotiationContext {
 			if !constructed_tx
 				.inputs
 				.iter()
-				.any(|input| input.txin().previous_output == shared_funding_input.0)
+				.any(|input| input.txin.previous_output == shared_funding_input.0)
 			{
 				return Err(AbortReason::MissingFundingInput);
 			}
@@ -1283,24 +1309,12 @@ struct SingleOwnedInput {
 	prev_output: TxOut,
 }
 
-impl_writeable_tlv_based!(SingleOwnedInput, {
-	(1, input, required),
-	(3, prev_tx, required),
-	(5, prev_output, required),
-});
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SharedOwnedInput {
 	input: TxIn,
 	prev_output: TxOut,
 	local_owned: u64,
 }
-
-impl_writeable_tlv_based!(SharedOwnedInput, {
-	(1, input, required),
-	(3, prev_output, required),
-	(5, local_owned, required),
-});
 
 impl SharedOwnedInput {
 	pub fn new(input: TxIn, prev_output: TxOut, local_owned: u64) -> Self {
@@ -1329,11 +1343,6 @@ enum InputOwned {
 	// Input with shared control and value split between the two ends (or fully at one side)
 	Shared(SharedOwnedInput),
 }
-
-impl_writeable_tlv_based_enum!(InputOwned,
-	{1, Single} => (),
-	{3, Shared} => (),
-);
 
 impl InputOwned {
 	pub fn tx_in(&self) -> &TxIn {
@@ -1398,12 +1407,6 @@ pub(crate) struct InteractiveTxInput {
 	added_by: AddingRole,
 	input: InputOwned,
 }
-
-impl_writeable_tlv_based!(InteractiveTxInput, {
-	(1, serial_id, required),
-	(3, added_by, required),
-	(5, input, required),
-});
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SharedOwnedOutput {
