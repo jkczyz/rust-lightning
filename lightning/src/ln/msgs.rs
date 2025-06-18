@@ -2667,10 +2667,10 @@ impl_writeable_msg!(SpliceLocked, {
 impl_writeable_msg!(TxAddInput, {
 	channel_id,
 	serial_id,
+	prevtx,
 	prevtx_out,
 	sequence,
 }, {
-	(0, prevtx, option),
 	(1, shared_input_txid, option), // `funding_txid`
 });
 
