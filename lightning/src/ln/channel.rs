@@ -2258,6 +2258,27 @@ impl FundingScope {
 			short_channel_id: None,
 		})
 	}
+
+	/// Returns a `SharedOwnedInput` for using this `FundingScope` as the input to a new splice.
+	#[cfg(splicing)]
+	fn to_splice_funding_input(&self) -> SharedOwnedInput {
+		let funding_txo = self.get_funding_txo().expect("funding_txo should be set");
+		let input = TxIn {
+			previous_output: funding_txo.into_bitcoin_outpoint(),
+			script_sig: ScriptBuf::new(),
+			sequence: Sequence::ZERO,
+			witness: Witness::new(),
+		};
+
+		let prev_output = TxOut {
+			value: Amount::from_sat(self.get_value_satoshis()),
+			script_pubkey: self.get_funding_redeemscript().to_p2wsh(),
+		};
+
+		let local_owned = self.value_to_self_msat / 1000;
+
+		SharedOwnedInput::new(input, prev_output, local_owned)
+	}
 }
 
 /// Info about a pending splice
@@ -10542,6 +10563,8 @@ where
 			false, // is_outbound
 		)?;
 
+		let prev_funding_input = self.funding.to_splice_funding_input();
+
 		let funding_negotiation_context = FundingNegotiationContext {
 			is_initiator: false,
 			our_funding_satoshis,
@@ -10576,14 +10599,13 @@ where
 			holder_commitment_transaction_number: self.holder_commitment_point.transaction_number(),
 		};
 
-		// Start interactive funding negotiation. TODO(splicing): Add current funding as extra input, once shared inputs are supported, see #3842.
 		let _msg = negotiating_view
 			.begin_interactive_funding_tx_construction(
 				signer_provider,
 				entropy_source,
 				holder_node_id.clone(),
 				None,
-				None,
+				Some(prev_funding_input),
 			)
 			.map_err(|err| {
 				ChannelError::Warn(format!(
@@ -10667,11 +10689,8 @@ where
 			true, // is_outbound
 		)?;
 
-		let pre_funding_transaction = &self.funding.funding_transaction;
-		let pre_funding_txo = &self.funding.get_funding_txo();
-		// We need the current funding tx as an extra input
-		let prev_funding_input =
-			Self::get_input_of_previous_funding(pre_funding_transaction, pre_funding_txo)?;
+		let prev_funding_input = self.funding.to_splice_funding_input();
+
 		debug_assert!(pending_splice.funding.is_none());
 		pending_splice.funding = Some(funding_scope);
 		// update funding values
@@ -10707,34 +10726,6 @@ where
 				ChannelError::Warn(format!("V2 channel rejected due to sender error, {:?}", err))
 			})?;
 		Ok(tx_msg_opt)
-	}
-
-	/// Get a transaction input that is the previous funding transaction
-	#[cfg(splicing)]
-	fn get_input_of_previous_funding(
-		pre_funding_transaction: &Option<Transaction>, pre_funding_txo: &Option<OutPoint>,
-	) -> Result<(TxIn, TransactionU16LenLimited), ChannelError> {
-		if let Some(pre_funding_transaction) = pre_funding_transaction {
-			if let Some(pre_funding_txo) = pre_funding_txo {
-				Ok((
-					TxIn {
-						previous_output: pre_funding_txo.into_bitcoin_outpoint(),
-						script_sig: ScriptBuf::new(),
-						sequence: Sequence::ZERO,
-						witness: Witness::new(),
-					},
-					TransactionU16LenLimited::new(pre_funding_transaction.clone()).unwrap(), // TODO err?
-				))
-			} else {
-				Err(ChannelError::Warn(
-					"Internal error: Missing previous funding transaction outpoint".to_string(),
-				))
-			}
-		} else {
-			Err(ChannelError::Warn(
-				"Internal error: Missing previous funding transaction".to_string(),
-			))
-		}
 	}
 
 	#[cfg(splicing)]
