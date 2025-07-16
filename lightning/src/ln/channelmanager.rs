@@ -7661,7 +7661,8 @@ where
 		ComplFunc: FnOnce(
 			Option<u64>,
 			bool,
-		) -> (Option<MonitorUpdateCompletionAction>, Option<RAAMonitorUpdateBlockingAction>),
+		)
+			-> (Option<MonitorUpdateCompletionAction>, Option<RAAMonitorUpdateBlockingAction>),
 	>(
 		&self, prev_hop: HTLCPreviousHopData, payment_preimage: PaymentPreimage,
 		payment_info: Option<PaymentClaimDetails>, completion_action: ComplFunc,
@@ -8893,9 +8894,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 		}
 	}
 
-	fn internal_tx_msg<
-		HandleTxMsgFn: Fn(&mut Channel<SP>) -> Result<MessageSendEvent, ChannelError>,
-	>(
+	fn internal_tx_msg<HandleTxMsgFn: Fn(&mut Channel<SP>) -> Option<MessageSendEvent>>(
 		&self, counterparty_node_id: &PublicKey, channel_id: ChannelId,
 		tx_msg_handler: HandleTxMsgFn,
 	) -> Result<(), MsgHandleErrInternal> {
@@ -8916,8 +8915,11 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 			hash_map::Entry::Occupied(mut chan_entry) => {
 				let channel = chan_entry.get_mut();
 				let msg_send_event = match tx_msg_handler(channel) {
-					Ok(msg_send_event) => msg_send_event,
-					Err(err) =>  return Err(MsgHandleErrInternal::from_chan_no_close(err, channel_id)),
+					Some(msg_send_event) => msg_send_event,
+					None => {
+						let err = ChannelError::Warn("Received unexpected interactive transaction negotiation message".to_owned());
+						return Err(MsgHandleErrInternal::from_chan_no_close(err, channel_id))
+					},
 				};
 				peer_state.pending_msg_events.push(msg_send_event);
 				Ok(())
@@ -8935,10 +8937,12 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 		&self, counterparty_node_id: PublicKey, msg: &msgs::TxAddInput,
 	) -> Result<(), MsgHandleErrInternal> {
 		self.internal_tx_msg(&counterparty_node_id, msg.channel_id, |channel: &mut Channel<SP>| {
-			Ok(channel
-				.as_negotiating_channel()?
-				.tx_add_input(msg)
-				.into_msg_send_event(counterparty_node_id))
+			Some(
+				channel
+					.as_negotiating_channel()?
+					.tx_add_input(msg)
+					.into_msg_send_event(counterparty_node_id),
+			)
 		})
 	}
 
@@ -8946,10 +8950,12 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 		&self, counterparty_node_id: PublicKey, msg: &msgs::TxAddOutput,
 	) -> Result<(), MsgHandleErrInternal> {
 		self.internal_tx_msg(&counterparty_node_id, msg.channel_id, |channel: &mut Channel<SP>| {
-			Ok(channel
-				.as_negotiating_channel()?
-				.tx_add_output(msg)
-				.into_msg_send_event(counterparty_node_id))
+			Some(
+				channel
+					.as_negotiating_channel()?
+					.tx_add_output(msg)
+					.into_msg_send_event(counterparty_node_id),
+			)
 		})
 	}
 
@@ -8957,10 +8963,12 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 		&self, counterparty_node_id: PublicKey, msg: &msgs::TxRemoveInput,
 	) -> Result<(), MsgHandleErrInternal> {
 		self.internal_tx_msg(&counterparty_node_id, msg.channel_id, |channel: &mut Channel<SP>| {
-			Ok(channel
-				.as_negotiating_channel()?
-				.tx_remove_input(msg)
-				.into_msg_send_event(counterparty_node_id))
+			Some(
+				channel
+					.as_negotiating_channel()?
+					.tx_remove_input(msg)
+					.into_msg_send_event(counterparty_node_id),
+			)
 		})
 	}
 
@@ -8968,10 +8976,12 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 		&self, counterparty_node_id: PublicKey, msg: &msgs::TxRemoveOutput,
 	) -> Result<(), MsgHandleErrInternal> {
 		self.internal_tx_msg(&counterparty_node_id, msg.channel_id, |channel: &mut Channel<SP>| {
-			Ok(channel
-				.as_negotiating_channel()?
-				.tx_remove_output(msg)
-				.into_msg_send_event(counterparty_node_id))
+			Some(
+				channel
+					.as_negotiating_channel()?
+					.tx_remove_output(msg)
+					.into_msg_send_event(counterparty_node_id),
+			)
 		})
 	}
 
@@ -8989,21 +8999,22 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 		let peer_state = &mut *peer_state_lock;
 		match peer_state.channel_by_id.entry(msg.channel_id) {
 			hash_map::Entry::Occupied(mut chan_entry) => {
-				let (msg_send_event_opt, signing_session_opt) = match chan_entry.get_mut().as_negotiating_channel() {
-					Ok(mut negotiating_channel) => negotiating_channel
+				let (msg_send_event_opt, ready_to_sign) = match chan_entry.get_mut().as_negotiating_channel() {
+					Some(mut negotiating_channel) => negotiating_channel
 						.tx_complete(msg)
-						.into_msg_send_event_or_signing_session(counterparty_node_id),
-					Err(err) => {
-						try_channel_entry!(self, peer_state, Err(err), chan_entry)
+						.into_msg_send_event(counterparty_node_id),
+					None => {
+						let err = ChannelError::Warn("Received unexpected tx_complete message".to_owned());
+						return Err(MsgHandleErrInternal::from_chan_no_close(err, msg.channel_id))
 					},
 				};
 				if let Some(msg_send_event) = msg_send_event_opt {
 					peer_state.pending_msg_events.push(msg_send_event);
 				};
-				if let Some(signing_session) = signing_session_opt {
+				if ready_to_sign {
 					let (commitment_signed, funding_ready_for_sig_event_opt) = chan_entry
 						.get_mut()
-						.funding_tx_constructed(signing_session, &self.logger)
+						.funding_tx_constructed(&self.logger)
 						.map_err(|err| MsgHandleErrInternal::send_err_msg_no_close(format!("{}", err), msg.channel_id))?;
 					if let Some(funding_ready_for_sig_event) = funding_ready_for_sig_event_opt {
 						let mut pending_events = self.pending_events.lock().unwrap();
