@@ -2768,17 +2768,13 @@ where
 	#[allow(dead_code)] // TODO(dual_funding): Remove once contribution to V2 channels is enabled
 	fn begin_interactive_funding_tx_construction<ES: Deref>(
 		&mut self, signer_provider: &SP, entropy_source: &ES, holder_node_id: PublicKey,
-		is_initiator: bool, change_destination_opt: Option<ScriptBuf>,
-		shared_funding_input: Option<SharedOwnedInput>,
+		change_destination_opt: Option<ScriptBuf>, shared_funding_input: Option<SharedOwnedInput>,
 	) -> Result<Option<InteractiveTxMessageSend>, AbortReason>
 	where
 		ES::Target: EntropySource,
 	{
 		debug_assert!(matches!(self.context.channel_state, ChannelState::NegotiatingFunding(_)));
 		debug_assert!(self.interactive_tx_constructor.is_none());
-
-		let mut funding_inputs = Vec::new();
-		mem::swap(&mut self.funding_negotiation_context.our_funding_inputs, &mut funding_inputs);
 
 		// Add output for funding tx
 		// Note: For the error case when the inputs are insufficient, it will be handled after
@@ -2799,13 +2795,10 @@ where
 				.map_err(|_err| AbortReason::InternalError("Error getting destination script"))?
 		};
 		let change_value_opt = calculate_change_output_value(
-			is_initiator,
-			self.funding_negotiation_context.our_funding_satoshis,
-			&funding_inputs,
+			&self.funding_negotiation_context,
 			None,
 			&shared_funding_output.script_pubkey,
 			&funding_outputs,
-			self.funding_negotiation_context.funding_feerate_sat_per_1000_weight,
 			change_script.minimal_non_dust().to_sat(),
 		)?;
 		if let Some(change_value) = change_value_opt {
@@ -2824,6 +2817,9 @@ where
 			}
 		}
 
+		let mut funding_inputs = Vec::new();
+		mem::swap(&mut self.funding_negotiation_context.our_funding_inputs, &mut funding_inputs);
+
 		let constructor_args = InteractiveTxConstructorArgs {
 			entropy_source,
 			holder_node_id,
@@ -2832,7 +2828,7 @@ where
 			feerate_sat_per_kw: self
 				.funding_negotiation_context
 				.funding_feerate_sat_per_1000_weight,
-			is_initiator,
+			is_initiator: self.funding_negotiation_context.is_initiator,
 			funding_tx_locktime: self.funding_negotiation_context.funding_tx_locktime,
 			inputs_to_contribute: funding_inputs,
 			shared_funding_input,
@@ -5852,6 +5848,8 @@ fn check_v2_funding_inputs_sufficient(
 
 /// Context for negotiating channels (dual-funded V2 open, splicing)
 pub(super) struct FundingNegotiationContext {
+	/// Whether we initiated the funding negotiation.
+	pub is_initiator: bool,
 	/// The amount in satoshis we will be contributing to the channel.
 	pub our_funding_satoshis: u64,
 	/// The amount in satoshis our counterparty will be contributing to the channel.
@@ -11869,6 +11867,7 @@ where
 			holder_commitment_point: HolderCommitmentPoint::new(&context.holder_signer, &context.secp_ctx),
 		};
 		let funding_negotiation_context = FundingNegotiationContext {
+			is_initiator: true,
 			our_funding_satoshis: funding_satoshis,
 			// TODO(dual_funding) TODO(splicing) Include counterparty contribution, once that's enabled
 			their_funding_satoshis: None,
@@ -12029,6 +12028,7 @@ where
 		context.channel_id = channel_id;
 
 		let funding_negotiation_context = FundingNegotiationContext {
+			is_initiator: false,
 			our_funding_satoshis: our_funding_satoshis,
 			their_funding_satoshis: Some(msg.common_fields.funding_satoshis),
 			funding_tx_locktime: LockTime::from_consensus(msg.locktime),
