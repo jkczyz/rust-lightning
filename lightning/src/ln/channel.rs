@@ -58,8 +58,8 @@ use crate::ln::channelmanager::{
 use crate::ln::interactivetxs::{
 	calculate_change_output_value, get_output_weight, AbortReason, HandleTxCompleteResult,
 	InteractiveTxConstructor, InteractiveTxConstructorArgs, InteractiveTxMessageSend,
-	InteractiveTxMessageSendResult, InteractiveTxSigningSession, SharedOwnedOutput,
-	TX_COMMON_FIELDS_WEIGHT,
+	InteractiveTxMessageSendResult, InteractiveTxSigningSession, SharedOwnedInput,
+	SharedOwnedOutput, TX_COMMON_FIELDS_WEIGHT,
 };
 use crate::ln::msgs;
 use crate::ln::msgs::{ClosingSigned, ClosingSignedFeeRange, DecodeError, OnionErrorPacket};
@@ -2769,7 +2769,7 @@ where
 	fn begin_interactive_funding_tx_construction<ES: Deref>(
 		&mut self, signer_provider: &SP, entropy_source: &ES, holder_node_id: PublicKey,
 		is_initiator: bool, change_destination_opt: Option<ScriptBuf>,
-		prev_funding_input: Option<(TxIn, TransactionU16LenLimited)>,
+		shared_funding_input: Option<SharedOwnedInput>,
 	) -> Result<Option<InteractiveTxMessageSend>, AbortReason>
 	where
 		ES::Target: EntropySource,
@@ -2779,12 +2779,6 @@ where
 
 		let mut funding_inputs = Vec::new();
 		mem::swap(&mut self.funding_negotiation_context.our_funding_inputs, &mut funding_inputs);
-
-		if is_initiator {
-			if let Some(prev_funding_input) = prev_funding_input {
-				funding_inputs.push(prev_funding_input);
-			}
-		}
 
 		// Add output for funding tx
 		// Note: For the error case when the inputs are insufficient, it will be handled after
@@ -2841,7 +2835,7 @@ where
 			is_initiator,
 			funding_tx_locktime: self.funding_negotiation_context.funding_tx_locktime,
 			inputs_to_contribute: funding_inputs,
-			shared_funding_input: None,
+			shared_funding_input,
 			shared_funding_output: SharedOwnedOutput::new(
 				shared_funding_output,
 				self.funding_negotiation_context.our_funding_satoshis,
