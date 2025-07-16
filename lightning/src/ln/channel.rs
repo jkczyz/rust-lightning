@@ -1739,7 +1739,7 @@ where
 			ChannelPhase::UnfundedV2(chan) => Ok(chan.as_negotiating_channel()),
 			#[cfg(splicing)]
 			ChannelPhase::Funded(chan) => {
-				Ok(chan.as_renegotiating_channel().map_err(|err| ChannelError::Warn(err.into()))?)
+				chan.as_renegotiating_channel().map_err(|err| ChannelError::Warn(err.into()))
 			},
 			_ => Err(ChannelError::Warn(
 				"Got a transaction negotiation message in an invalid phase".to_owned(),
@@ -1787,9 +1787,7 @@ where
 	{
 		let logger = WithChannelContext::from(logger, self.context(), None);
 		let mut negotiating_channel = self.as_negotiating_channel()?;
-		let (commitment_signed, event) =
-			negotiating_channel.funding_tx_constructed(signing_session, &&logger)?;
-		Ok((commitment_signed, event))
+		negotiating_channel.funding_tx_constructed(signing_session, &&logger)
 	}
 
 	pub fn force_shutdown(&mut self, closure_reason: ClosureReason) -> ShutdownResult {
@@ -2219,11 +2217,12 @@ impl FundingScope {
 			channel_type_features: channel_parameters.channel_type_features.clone(),
 			channel_value_satoshis: post_channel_value,
 		};
-		if let Some(ref mut counterparty_parameters) =
-			post_channel_transaction_parameters.counterparty_parameters
-		{
-			counterparty_parameters.pubkeys.funding_pubkey = counterparty_funding_pubkey;
-		}
+		post_channel_transaction_parameters
+			.counterparty_parameters
+			.as_mut()
+			.expect("counterparty_parameters should be set")
+			.pubkeys
+			.funding_pubkey = counterparty_funding_pubkey;
 
 		// New reserve values are based on the new channel value, and v2-specific
 		let counterparty_selected_channel_reserve_satoshis = Some(get_v2_channel_reserve_satoshis(
