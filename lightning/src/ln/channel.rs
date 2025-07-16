@@ -2842,7 +2842,10 @@ where
 			funding_tx_locktime: self.funding_negotiation_context.funding_tx_locktime,
 			inputs_to_contribute: funding_inputs,
 			shared_funding_input: None,
-			shared_funding_output: SharedOwnedOutput::new(shared_funding_output, self.funding_negotiation_context.our_funding_satoshis),
+			shared_funding_output: SharedOwnedOutput::new(
+				shared_funding_output,
+				self.funding_negotiation_context.our_funding_satoshis,
+			),
 			outputs_to_contribute: funding_outputs,
 		};
 		let mut tx_constructor = InteractiveTxConstructor::new(constructor_args)?;
