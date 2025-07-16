@@ -3000,22 +3000,10 @@ mod tests {
 			Ok(Some(gross_change - fees)),
 		);
 
-		// Larger fee, smaller change
-		let context = FundingNegotiationContext {
-			is_initiator: true,
-			funding_feerate_sat_per_1000_weight: funding_feerate_sat_per_1000_weight * 3,
-			..context
-		};
-		assert_eq!(
-			calculate_change_output_value(&context, None, &ScriptBuf::new(), &outputs, 300),
-			Ok(Some(4060)),
-		);
-
 		// Insufficient inputs, no leftover
 		let context = FundingNegotiationContext {
 			is_initiator: false,
 			our_funding_satoshis: 130_000,
-			funding_feerate_sat_per_1000_weight: funding_feerate_sat_per_1000_weight,
 			..context
 		};
 		assert_eq!(
@@ -3043,6 +3031,18 @@ mod tests {
 		assert_eq!(
 			calculate_change_output_value(&context, None, &ScriptBuf::new(), &outputs, 100),
 			Ok(Some(262)),
+		);
+
+		// Larger fee, smaller change
+		let context = FundingNegotiationContext {
+			is_initiator: true,
+			our_funding_satoshis: our_contributed,
+			funding_feerate_sat_per_1000_weight: funding_feerate_sat_per_1000_weight * 3,
+			..context
+		};
+		assert_eq!(
+			calculate_change_output_value(&context, None, &ScriptBuf::new(), &outputs, 300),
+			Ok(Some(4060)),
 		);
 	}
 }
