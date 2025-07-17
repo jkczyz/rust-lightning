@@ -2949,7 +2949,7 @@ pub(super) struct NegotiatingChannelView<'a>(&'a mut InteractiveTxConstructor);
 #[allow(dead_code)] // TODO(dual_funding): Remove once contribution to V2 channels is enabled
 fn begin_interactive_funding_tx_construction<SP: Deref, ES: Deref>(
 	funding: &FundingScope, context: &ChannelContext<SP>,
-	mut funding_negotiation_context: FundingNegotiationContext, is_splice: bool,
+	funding_negotiation_context: FundingNegotiationContext, is_splice: bool,
 	signer_provider: &SP, entropy_source: &ES, holder_node_id: PublicKey,
 	change_destination_opt: Option<ScriptBuf>, shared_funding_input: Option<SharedOwnedInput>,
 ) -> Result<InteractiveTxConstructor, AbortReason>
@@ -3004,9 +3004,6 @@ where
 		}
 	}
 
-	let mut funding_inputs = Vec::new();
-	mem::swap(&mut funding_negotiation_context.our_funding_inputs, &mut funding_inputs);
-
 	let constructor_args = InteractiveTxConstructorArgs {
 		entropy_source,
 		holder_node_id,
@@ -3015,7 +3012,7 @@ where
 		feerate_sat_per_kw: funding_negotiation_context.funding_feerate_sat_per_1000_weight,
 		is_initiator: funding_negotiation_context.is_initiator,
 		funding_tx_locktime: funding_negotiation_context.funding_tx_locktime,
-		inputs_to_contribute: funding_inputs,
+		inputs_to_contribute: funding_negotiation_context.our_funding_inputs,
 		shared_funding_input,
 		shared_funding_output: SharedOwnedOutput::new(
 			shared_funding_output,
