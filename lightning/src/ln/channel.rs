@@ -1883,7 +1883,8 @@ where
 			ChannelPhase::Funded(mut funded_channel) => {
 				#[cfg(splicing)]
 				let has_negotiated_pending_splice = funded_channel.pending_splice.as_ref()
-					.map(|pending_splice| pending_splice.funding.is_some())
+					.and_then(|pending_splice| pending_splice.funding_negotiation.as_ref())
+					.map(|funding_negotiation| funding_negotiation.as_funding().is_some())
 					.unwrap_or(false);
 				#[cfg(splicing)]
 				let session_received_commitment_signed = funded_channel
@@ -2330,8 +2331,7 @@ impl FundingScope {
 struct PendingSplice {
 	/// Intended contributions to the splice from our end
 	pub our_funding_contribution: i64,
-	funding: Option<FundingScope>,
-	funding_negotiation_context: Option<FundingNegotiationContext>,
+	funding_negotiation: Option<FundingNegotiation>,
 	/// The current interactive transaction construction session under negotiation.
 	interactive_tx_constructor: Option<InteractiveTxConstructor>,
 
@@ -2340,6 +2340,20 @@ struct PendingSplice {
 
 	/// The funding txid used in the `splice_locked` received from the counterparty.
 	received_funding_txid: Option<Txid>,
+}
+
+enum FundingNegotiation {
+	AwaitingAck(FundingNegotiationContext),
+	Pending(FundingScope),
+}
+
+impl FundingNegotiation {
+	fn as_funding(&self) -> Option<&FundingScope> {
+		match self {
+			FundingNegotiation::AwaitingAck(_) => None,
+			FundingNegotiation::Pending(funding) => Some(funding),
+		}
+	}
 }
 
 #[cfg(splicing)]
@@ -6884,7 +6898,8 @@ where
 		let pending_splice_funding = self
 			.pending_splice
 			.as_ref()
-			.and_then(|pending_splice| pending_splice.funding.as_ref())
+			.and_then(|pending_splice| pending_splice.funding_negotiation.as_ref())
+			.and_then(|funding_negotiation| funding_negotiation.as_funding())
 			.expect("Funding must exist for negotiated pending splice");
 		let (holder_commitment_tx, _) = self.context.validate_commitment_signed(
 			pending_splice_funding,
@@ -10416,8 +10431,7 @@ where
 		};
 		self.pending_splice = Some(PendingSplice {
 			our_funding_contribution: our_funding_contribution_satoshis,
-			funding: None,
-			funding_negotiation_context: Some(funding_negotiation_context),
+			funding_negotiation: Some(FundingNegotiation::AwaitingAck(funding_negotiation_context)),
 			interactive_tx_constructor: None,
 			sent_funding_txid: None,
 			received_funding_txid: None,
@@ -10581,8 +10595,7 @@ where
 
 		self.pending_splice = Some(PendingSplice {
 			our_funding_contribution,
-			funding: Some(splice_funding),
-			funding_negotiation_context: None,
+			funding_negotiation: Some(FundingNegotiation::Pending(splice_funding)),
 			interactive_tx_constructor: Some(interactive_tx_constructor),
 			received_funding_txid: None,
 			sent_funding_txid: None,
@@ -10625,11 +10638,20 @@ where
 
 		// TODO(splicing): Add check that we are the splice (quiescence) initiator
 
-		if pending_splice.funding.is_some() || pending_splice.interactive_tx_constructor.is_some() {
-			return Err(ChannelError::Warn(format!(
-				"Got unexpected splice_ack, splice already negotiating"
-			)));
-		}
+		let mut funding_negotiation_context = match pending_splice.funding_negotiation.take() {
+			Some(FundingNegotiation::AwaitingAck(context)) => context,
+			Some(FundingNegotiation::Pending(funding)) => {
+				pending_splice.funding_negotiation = Some(FundingNegotiation::Pending(funding));
+				return Err(ChannelError::Warn(format!(
+					"Got unexpected splice_ack; splice negotiation already in progress"
+				)));
+			},
+			None => {
+				return Err(ChannelError::Warn(format!(
+					"Got unexpected splice_ack; no splice negotiation in progress"
+				)));
+			},
+		};
 
 		let our_funding_contribution = pending_splice.our_funding_contribution;
 		let their_funding_contribution_satoshis = msg.funding_contribution_satoshis;
@@ -10666,16 +10688,13 @@ where
 		let prev_funding_input = self.funding.to_splice_funding_input();
 
 		// update funding values
-		pending_splice.funding_negotiation_context.as_mut().unwrap().our_funding_satoshis =
-			our_funding_satoshis;
-		pending_splice.funding_negotiation_context.as_mut().unwrap().their_funding_satoshis =
-			Some(their_funding_satoshis);
+		funding_negotiation_context.our_funding_satoshis = our_funding_satoshis;
+		funding_negotiation_context.their_funding_satoshis = Some(their_funding_satoshis);
 
 		log_info!(logger, "Splicing process started after splice_ack, new channel value {}, old {}, outgoing {}, channel_id {}",
 			post_channel_value, pre_channel_value, true, self.context.channel_id);
 
 		// Start interactive funding negotiation, with the previous funding transaction as an extra shared input
-		let funding_negotiation_context = pending_splice.funding_negotiation_context.take().unwrap();
 		let mut interactive_tx_constructor = funding_negotiation_context
 			.into_interactive_tx_constructor(
 				&self.context,
@@ -10692,10 +10711,9 @@ where
 			})?;
 		let tx_msg_opt = interactive_tx_constructor.take_initiator_first_message();
 
-		debug_assert!(pending_splice.funding.is_none());
 		debug_assert!(pending_splice.interactive_tx_constructor.is_none());
 		debug_assert!(self.interactive_tx_signing_session.is_none());
-		pending_splice.funding = Some(splice_funding);
+		pending_splice.funding_negotiation = Some(FundingNegotiation::Pending(splice_funding));
 		pending_splice.interactive_tx_constructor = Some(interactive_tx_constructor);
 
 		Ok(tx_msg_opt)
