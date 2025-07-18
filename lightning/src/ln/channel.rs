@@ -1786,9 +1786,8 @@ where
 			ChannelPhase::UnfundedV2(chan) => {
 				let mut signing_session =
 					chan.interactive_tx_constructor.take().expect("TODO").into_signing_session();
-				let result = funding_tx_constructed(
+				let result = chan.context.funding_tx_constructed(
 					&mut chan.funding,
-					&mut chan.context,
 					&mut signing_session,
 					false,
 					chan.unfunded_context.transaction_number(),
@@ -1811,9 +1810,8 @@ where
 						{
 							let mut signing_session =
 								interactive_tx_constructor.into_signing_session();
-							let result = funding_tx_constructed(
+							let result = chan.context.funding_tx_constructed(
 								&mut funding,
-								&mut chan.context,
 								&mut signing_session,
 								true,
 								chan.holder_commitment_point.transaction_number(),
@@ -2965,99 +2963,6 @@ where
 /// - [`PendingV2Channel`], at V2 channel open, and
 /// - [`FundedChannel`], when splicing.
 pub(super) struct NegotiatingChannelView<'a>(&'a mut InteractiveTxConstructor);
-
-#[rustfmt::skip]
-fn funding_tx_constructed<SP:Deref, L: Deref>(
-	funding: &mut FundingScope, context: &mut ChannelContext<SP>,
-	signing_session: &mut InteractiveTxSigningSession, is_splice: bool,
-	holder_commitment_transaction_number: u64, logger: &L
-) -> Result<(msgs::CommitmentSigned, Option<Event>), ChannelError>
-where
-	SP::Target: SignerProvider,
-	L::Target: Logger
-{
-	let mut output_index = None;
-	let expected_spk = funding.get_funding_redeemscript().to_p2wsh();
-	for (idx, outp) in signing_session.unsigned_tx().outputs().enumerate() {
-		if outp.script_pubkey() == &expected_spk && outp.value() == funding.get_value_satoshis() {
-			if output_index.is_some() {
-				let msg = "Multiple outputs matched the expected script and value";
-				let reason = ClosureReason::ProcessingError { err: msg.to_owned() };
-				return Err(ChannelError::Close((msg.to_owned(), reason)));
-			}
-			output_index = Some(idx as u16);
-		}
-	}
-	let outpoint = if let Some(output_index) = output_index {
-		OutPoint { txid: signing_session.unsigned_tx().compute_txid(), index: output_index }
-	} else {
-		let msg = "No output matched the funding script_pubkey";
-		let reason = ClosureReason::ProcessingError { err: msg.to_owned() };
-		return Err(ChannelError::Close((msg.to_owned(), reason)));
-	};
-	funding
-		.channel_transaction_parameters.funding_outpoint = Some(outpoint);
-
-	if is_splice {
-		let message = "TODO Forced error, incomplete implementation".to_owned();
-		// TODO(splicing) Forced error, as the use case is not complete
-		return Err(ChannelError::Close((
-			message.clone(),
-			ClosureReason::HolderForceClosed { broadcasted_latest_txn: Some(false), message }
-		)));
-	}
-
-	context.assert_no_commitment_advancement(holder_commitment_transaction_number, "initial commitment_signed");
-	let commitment_signed = context.get_initial_commitment_signed(&funding, logger);
-	let commitment_signed = match commitment_signed {
-		Ok(commitment_signed) => commitment_signed,
-		Err(e) => {
-			funding.channel_transaction_parameters.funding_outpoint = None;
-			return Err(e)
-		},
-	};
-
-	let funding_ready_for_sig_event = if signing_session.local_inputs_count() == 0 {
-		if signing_session.provide_holder_witnesses(context.channel_id, Vec::new()).is_err() {
-			debug_assert!(
-				false,
-				"Zero inputs were provided & zero witnesses were provided, but a count mismatch was somehow found",
-			);
-			let msg = "V2 channel rejected due to sender error";
-			let reason = ClosureReason::ProcessingError { err: msg.to_owned() };
-			return Err(ChannelError::Close((msg.to_owned(), reason)));
-		}
-		None
-	} else {
-		// TODO(dual_funding): Send event for signing if we've contributed funds.
-		// Inform the user that SIGHASH_ALL must be used for all signatures when contributing
-		// inputs/signatures.
-		// Also warn the user that we don't do anything to prevent the counterparty from
-		// providing non-standard witnesses which will prevent the funding transaction from
-		// confirming. This warning must appear in doc comments wherever the user is contributing
-		// funds, whether they are initiator or acceptor.
-		//
-		// The following warning can be used when the APIs allowing contributing inputs become available:
-		// <div class="warning">
-		// WARNING: LDK makes no attempt to prevent the counterparty from using non-standard inputs which
-		// will prevent the funding transaction from being relayed on the bitcoin network and hence being
-		// confirmed.
-		// </div>
-		debug_assert!(
-			false,
-			"We don't support users providing inputs but somehow we had more than zero inputs",
-		);
-		let msg = "V2 channel rejected due to sender error";
-		let reason = ClosureReason::ProcessingError { err: msg.to_owned() };
-		return Err(ChannelError::Close((msg.to_owned(), reason)));
-	};
-
-	let mut channel_state = ChannelState::FundingNegotiated(FundingNegotiatedFlags::new());
-	channel_state.set_interactive_signing();
-	context.channel_state = channel_state;
-
-	Ok((commitment_signed, funding_ready_for_sig_event))
-}
 
 impl<'a> NegotiatingChannelView<'a> {
 	pub(super) fn tx_add_input(
@@ -5573,6 +5478,97 @@ where
 	 	funding.channel_transaction_parameters.channel_type_features = next_channel_type;
 
 		Ok(())
+	}
+
+	#[rustfmt::skip]
+	fn funding_tx_constructed<L: Deref>(
+		&mut self, funding: &mut FundingScope, signing_session: &mut InteractiveTxSigningSession,
+		is_splice: bool, holder_commitment_transaction_number: u64, logger: &L
+	) -> Result<(msgs::CommitmentSigned, Option<Event>), ChannelError>
+	where
+		L::Target: Logger
+	{
+		let mut output_index = None;
+		let expected_spk = funding.get_funding_redeemscript().to_p2wsh();
+		for (idx, outp) in signing_session.unsigned_tx().outputs().enumerate() {
+			if outp.script_pubkey() == &expected_spk && outp.value() == funding.get_value_satoshis() {
+				if output_index.is_some() {
+					let msg = "Multiple outputs matched the expected script and value";
+					let reason = ClosureReason::ProcessingError { err: msg.to_owned() };
+					return Err(ChannelError::Close((msg.to_owned(), reason)));
+				}
+				output_index = Some(idx as u16);
+			}
+		}
+		let outpoint = if let Some(output_index) = output_index {
+			OutPoint { txid: signing_session.unsigned_tx().compute_txid(), index: output_index }
+		} else {
+			let msg = "No output matched the funding script_pubkey";
+			let reason = ClosureReason::ProcessingError { err: msg.to_owned() };
+			return Err(ChannelError::Close((msg.to_owned(), reason)));
+		};
+		funding
+			.channel_transaction_parameters.funding_outpoint = Some(outpoint);
+
+		if is_splice {
+			let message = "TODO Forced error, incomplete implementation".to_owned();
+			// TODO(splicing) Forced error, as the use case is not complete
+			return Err(ChannelError::Close((
+				message.clone(),
+				ClosureReason::HolderForceClosed { broadcasted_latest_txn: Some(false), message }
+			)));
+		}
+
+		self.assert_no_commitment_advancement(holder_commitment_transaction_number, "initial commitment_signed");
+		let commitment_signed = self.get_initial_commitment_signed(&funding, logger);
+		let commitment_signed = match commitment_signed {
+			Ok(commitment_signed) => commitment_signed,
+			Err(e) => {
+				funding.channel_transaction_parameters.funding_outpoint = None;
+				return Err(e)
+			},
+		};
+
+		let funding_ready_for_sig_event = if signing_session.local_inputs_count() == 0 {
+			if signing_session.provide_holder_witnesses(self.channel_id, Vec::new()).is_err() {
+				debug_assert!(
+					false,
+					"Zero inputs were provided & zero witnesses were provided, but a count mismatch was somehow found",
+				);
+				let msg = "V2 channel rejected due to sender error";
+				let reason = ClosureReason::ProcessingError { err: msg.to_owned() };
+				return Err(ChannelError::Close((msg.to_owned(), reason)));
+			}
+			None
+		} else {
+			// TODO(dual_funding): Send event for signing if we've contributed funds.
+			// Inform the user that SIGHASH_ALL must be used for all signatures when contributing
+			// inputs/signatures.
+			// Also warn the user that we don't do anything to prevent the counterparty from
+			// providing non-standard witnesses which will prevent the funding transaction from
+			// confirming. This warning must appear in doc comments wherever the user is contributing
+			// funds, whether they are initiator or acceptor.
+			//
+			// The following warning can be used when the APIs allowing contributing inputs become available:
+			// <div class="warning">
+			// WARNING: LDK makes no attempt to prevent the counterparty from using non-standard inputs which
+			// will prevent the funding transaction from being relayed on the bitcoin network and hence being
+			// confirmed.
+			// </div>
+			debug_assert!(
+				false,
+				"We don't support users providing inputs but somehow we had more than zero inputs",
+			);
+			let msg = "V2 channel rejected due to sender error";
+			let reason = ClosureReason::ProcessingError { err: msg.to_owned() };
+			return Err(ChannelError::Close((msg.to_owned(), reason)));
+		};
+
+		let mut channel_state = ChannelState::FundingNegotiated(FundingNegotiatedFlags::new());
+		channel_state.set_interactive_signing();
+		self.channel_state = channel_state;
+
+		Ok((commitment_signed, funding_ready_for_sig_event))
 	}
 
 	/// Asserts that the commitment tx numbers have not advanced from their initial number.
