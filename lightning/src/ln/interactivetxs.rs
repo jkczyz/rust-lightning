@@ -1270,6 +1270,10 @@ impl SharedOwnedInput {
 		Self { input, prev_output, local_owned }
 	}
 
+	pub fn local_owned(&self) -> u64 {
+		self.local_owned
+	}
+
 	fn remote_owned(&self) -> u64 {
 		self.prev_output.value.to_sat().saturating_sub(self.local_owned)
 	}

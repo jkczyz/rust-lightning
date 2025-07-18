@@ -2960,7 +2960,7 @@ where
 		};
 		let change_value_opt = calculate_change_output_value(
 			&self.funding_negotiation_context,
-			None,
+			shared_funding_input.as_ref().map(|input| input.local_owned()),
 			&shared_funding_output.script_pubkey,
 			&funding_outputs,
 			change_script.minimal_non_dust().to_sat(),
