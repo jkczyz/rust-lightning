@@ -1782,57 +1782,74 @@ where
 		L::Target: Logger,
 	{
 		let logger = WithChannelContext::from(logger, self.context(), None);
-		let (funding, context, signing_session, is_splice, holder_commitment_transaction_number) =
-			// TODO: Could use a wrapper or trait to DRY this
-			match &mut self.phase {
-				ChannelPhase::UnfundedV2(chan) => {
-					chan.interactive_tx_signing_session = Some(
-						chan.interactive_tx_constructor
-							.take()
-							.expect("TODO")
-							.into_signing_session(),
-					);
-					(
-						&mut chan.funding,
-						&mut chan.context,
-						chan.interactive_tx_signing_session.as_mut().expect("TODO"),
-						false,
-						chan.unfunded_context.transaction_number(),
-					)
-				},
-				#[cfg(splicing)]
-				ChannelPhase::Funded(chan) => {
-					chan.interactive_tx_signing_session = Some(
-						chan.pending_splice
-							.as_mut()
-							.expect("TODO")
-							.interactive_tx_constructor
-							.take()
-							.expect("TODO")
-							.into_signing_session(),
-					);
-					(
-						&mut chan.funding,
-						&mut chan.context,
-						chan.interactive_tx_signing_session.as_mut().expect("TODO"),
-						true,
-						chan.holder_commitment_point.transaction_number(),
-					)
-				},
-				_ => {
+		match &mut self.phase {
+			ChannelPhase::UnfundedV2(chan) => {
+				let mut signing_session =
+					chan.interactive_tx_constructor.take().expect("TODO").into_signing_session();
+				let result = funding_tx_constructed(
+					&mut chan.funding,
+					&mut chan.context,
+					&mut signing_session,
+					false,
+					chan.unfunded_context.transaction_number(),
+					&&logger,
+				);
+
+				// FIXME: Should this remain None if result is an Err?
+				chan.interactive_tx_signing_session = Some(signing_session);
+
+				return result;
+			},
+			#[cfg(splicing)]
+			ChannelPhase::Funded(chan) => {
+				if let Some(pending_splice) = chan.pending_splice.as_mut() {
+					if let Some(funding_negotiation) = pending_splice.funding_negotiation.take() {
+						if let FundingNegotiation::Pending(
+							mut funding,
+							interactive_tx_constructor,
+						) = funding_negotiation
+						{
+							let mut signing_session =
+								interactive_tx_constructor.into_signing_session();
+							let result = funding_tx_constructed(
+								&mut funding,
+								&mut chan.context,
+								&mut signing_session,
+								true,
+								chan.holder_commitment_point.transaction_number(),
+								&&logger,
+							);
+
+							// FIXME: Should these remain None if result is an Err?
+							chan.interactive_tx_signing_session = Some(signing_session);
+							pending_splice.funding_negotiation =
+								Some(FundingNegotiation::AwaitingSignatures(funding));
+
+							return result;
+						} else {
+							pending_splice.funding_negotiation = Some(funding_negotiation);
+							return Err(ChannelError::Warn(
+								"Got a transaction negotiation message in an invalid state"
+									.to_owned(),
+							));
+						}
+					} else {
+						return Err(ChannelError::Warn(
+							"Got a transaction negotiation message in an invalid state".to_owned(),
+						));
+					}
+				} else {
 					return Err(ChannelError::Warn(
-						"Got a transaction negotiation message in an invalid phase".to_owned(),
-					))
-				},
-			};
-		funding_tx_constructed(
-			funding,
-			context,
-			signing_session,
-			is_splice,
-			holder_commitment_transaction_number,
-			&&logger,
-		)
+						"Got a transaction negotiation message in an invalid state".to_owned(),
+					));
+				}
+			},
+			_ => {
+				return Err(ChannelError::Warn(
+					"Got a transaction negotiation message in an invalid phase".to_owned(),
+				))
+			},
+		}
 	}
 
 	pub fn force_shutdown(&mut self, closure_reason: ClosureReason) -> ShutdownResult {
@@ -2332,8 +2349,6 @@ struct PendingSplice {
 	/// Intended contributions to the splice from our end
 	pub our_funding_contribution: i64,
 	funding_negotiation: Option<FundingNegotiation>,
-	/// The current interactive transaction construction session under negotiation.
-	interactive_tx_constructor: Option<InteractiveTxConstructor>,
 
 	/// The funding txid used in the `splice_locked` sent to the counterparty.
 	sent_funding_txid: Option<Txid>,
@@ -2344,14 +2359,16 @@ struct PendingSplice {
 
 enum FundingNegotiation {
 	AwaitingAck(FundingNegotiationContext),
-	Pending(FundingScope),
+	Pending(FundingScope, InteractiveTxConstructor),
+	AwaitingSignatures(FundingScope),
 }
 
 impl FundingNegotiation {
 	fn as_funding(&self) -> Option<&FundingScope> {
 		match self {
 			FundingNegotiation::AwaitingAck(_) => None,
-			FundingNegotiation::Pending(funding) => Some(funding),
+			FundingNegotiation::Pending(funding, _) => Some(funding),
+			FundingNegotiation::AwaitingSignatures(funding) => Some(funding),
 		}
 	}
 }
@@ -6173,8 +6190,16 @@ where
 	fn as_renegotiating_channel(&mut self) -> Option<NegotiatingChannelView> {
 		self.pending_splice
 			.as_mut()
-			.and_then(|pending_splice| pending_splice.interactive_tx_constructor.as_mut())
-			.map(|interactive_tx_constructor| NegotiatingChannelView(interactive_tx_constructor))
+			.and_then(|pending_splice| pending_splice.funding_negotiation.as_mut())
+			.and_then(|funding_negotiation| {
+				if let FundingNegotiation::Pending(_, interactive_tx_constructor) =
+					funding_negotiation
+				{
+					Some(NegotiatingChannelView(interactive_tx_constructor))
+				} else {
+					None
+				}
+			})
 	}
 
 	#[rustfmt::skip]
@@ -10432,7 +10457,6 @@ where
 		self.pending_splice = Some(PendingSplice {
 			our_funding_contribution: our_funding_contribution_satoshis,
 			funding_negotiation: Some(FundingNegotiation::AwaitingAck(funding_negotiation_context)),
-			interactive_tx_constructor: None,
 			sent_funding_txid: None,
 			received_funding_txid: None,
 		});
@@ -10595,8 +10619,10 @@ where
 
 		self.pending_splice = Some(PendingSplice {
 			our_funding_contribution,
-			funding_negotiation: Some(FundingNegotiation::Pending(splice_funding)),
-			interactive_tx_constructor: Some(interactive_tx_constructor),
+			funding_negotiation: Some(FundingNegotiation::Pending(
+				splice_funding,
+				interactive_tx_constructor,
+			)),
 			received_funding_txid: None,
 			sent_funding_txid: None,
 		});
@@ -10640,8 +10666,16 @@ where
 
 		let mut funding_negotiation_context = match pending_splice.funding_negotiation.take() {
 			Some(FundingNegotiation::AwaitingAck(context)) => context,
-			Some(FundingNegotiation::Pending(funding)) => {
-				pending_splice.funding_negotiation = Some(FundingNegotiation::Pending(funding));
+			Some(FundingNegotiation::Pending(funding, constructor)) => {
+				pending_splice.funding_negotiation =
+					Some(FundingNegotiation::Pending(funding, constructor));
+				return Err(ChannelError::Warn(format!(
+					"Got unexpected splice_ack; splice negotiation already in progress"
+				)));
+			},
+			Some(FundingNegotiation::AwaitingSignatures(funding)) => {
+				pending_splice.funding_negotiation =
+					Some(FundingNegotiation::AwaitingSignatures(funding));
 				return Err(ChannelError::Warn(format!(
 					"Got unexpected splice_ack; splice negotiation already in progress"
 				)));
@@ -10711,10 +10745,9 @@ where
 			})?;
 		let tx_msg_opt = interactive_tx_constructor.take_initiator_first_message();
 
-		debug_assert!(pending_splice.interactive_tx_constructor.is_none());
 		debug_assert!(self.interactive_tx_signing_session.is_none());
-		pending_splice.funding_negotiation = Some(FundingNegotiation::Pending(splice_funding));
-		pending_splice.interactive_tx_constructor = Some(interactive_tx_constructor);
+		pending_splice.funding_negotiation =
+			Some(FundingNegotiation::Pending(splice_funding, interactive_tx_constructor));
 
 		Ok(tx_msg_opt)
 	}
