@@ -66,6 +66,7 @@ use crate::ln::channel::{
 };
 use crate::ln::channel_state::ChannelDetails;
 use crate::ln::inbound_payment;
+use crate::ln::interactivetxs::{HandleTxCompleteResult, InteractiveTxMessageSendResult};
 use crate::ln::msgs;
 use crate::ln::msgs::{
 	BaseMessageHandler, ChannelMessageHandler, CommitmentUpdate, DecodeError, LightningError,
@@ -8938,10 +8939,13 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 	) -> Result<(), MsgHandleErrInternal> {
 		self.internal_tx_msg(&counterparty_node_id, msg.channel_id, |channel: &mut Channel<SP>| {
 			Some(
-				channel
-					.as_negotiating_channel()?
-					.tx_add_input(msg)
-					.into_msg_send_event(counterparty_node_id),
+				InteractiveTxMessageSendResult(
+					channel
+						.interactive_tx_constructor_mut()?
+						.handle_tx_add_input(msg)
+						.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
+				)
+				.into_msg_send_event(counterparty_node_id),
 			)
 		})
 	}
@@ -8951,10 +8955,13 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 	) -> Result<(), MsgHandleErrInternal> {
 		self.internal_tx_msg(&counterparty_node_id, msg.channel_id, |channel: &mut Channel<SP>| {
 			Some(
-				channel
-					.as_negotiating_channel()?
-					.tx_add_output(msg)
-					.into_msg_send_event(counterparty_node_id),
+				InteractiveTxMessageSendResult(
+					channel
+						.interactive_tx_constructor_mut()?
+						.handle_tx_add_output(msg)
+						.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
+				)
+				.into_msg_send_event(counterparty_node_id),
 			)
 		})
 	}
@@ -8964,10 +8971,13 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 	) -> Result<(), MsgHandleErrInternal> {
 		self.internal_tx_msg(&counterparty_node_id, msg.channel_id, |channel: &mut Channel<SP>| {
 			Some(
-				channel
-					.as_negotiating_channel()?
-					.tx_remove_input(msg)
-					.into_msg_send_event(counterparty_node_id),
+				InteractiveTxMessageSendResult(
+					channel
+						.interactive_tx_constructor_mut()?
+						.handle_tx_remove_input(msg)
+						.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
+				)
+				.into_msg_send_event(counterparty_node_id),
 			)
 		})
 	}
@@ -8977,10 +8987,13 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 	) -> Result<(), MsgHandleErrInternal> {
 		self.internal_tx_msg(&counterparty_node_id, msg.channel_id, |channel: &mut Channel<SP>| {
 			Some(
-				channel
-					.as_negotiating_channel()?
-					.tx_remove_output(msg)
-					.into_msg_send_event(counterparty_node_id),
+				InteractiveTxMessageSendResult(
+					channel
+						.interactive_tx_constructor_mut()?
+						.handle_tx_remove_output(msg)
+						.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
+				)
+				.into_msg_send_event(counterparty_node_id),
 			)
 		})
 	}
@@ -8999,10 +9012,15 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 		let peer_state = &mut *peer_state_lock;
 		match peer_state.channel_by_id.entry(msg.channel_id) {
 			hash_map::Entry::Occupied(mut chan_entry) => {
-				let (msg_send_event_opt, ready_to_sign) = match chan_entry.get_mut().as_negotiating_channel() {
-					Some(mut negotiating_channel) => negotiating_channel
-						.tx_complete(msg)
-						.into_msg_send_event(counterparty_node_id),
+				let (msg_send_event_opt, ready_to_sign) = match chan_entry.get_mut().interactive_tx_constructor_mut() {
+					Some(interactive_tx_constructor) => {
+						HandleTxCompleteResult(
+							interactive_tx_constructor
+								.handle_tx_complete(msg)
+								.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
+						)
+						.into_msg_send_event(counterparty_node_id)
+					},
 					None => {
 						let err = ChannelError::Warn("Received unexpected tx_complete message".to_owned());
 						return Err(MsgHandleErrInternal::from_chan_no_close(err, msg.channel_id))

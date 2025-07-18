@@ -58,10 +58,9 @@ use crate::ln::channelmanager::{
 	BREAKDOWN_TIMEOUT, MAX_LOCAL_BREAKDOWN_TIMEOUT, MIN_CLTV_EXPIRY_DELTA,
 };
 use crate::ln::interactivetxs::{
-	calculate_change_output_value, get_output_weight, AbortReason, HandleTxCompleteResult,
-	InteractiveTxConstructor, InteractiveTxConstructorArgs, InteractiveTxMessageSend,
-	InteractiveTxMessageSendResult, InteractiveTxSigningSession, SharedOwnedInput,
-	SharedOwnedOutput, TX_COMMON_FIELDS_WEIGHT,
+	calculate_change_output_value, get_output_weight, AbortReason, InteractiveTxConstructor,
+	InteractiveTxConstructorArgs, InteractiveTxMessageSend, InteractiveTxSigningSession,
+	SharedOwnedInput, SharedOwnedOutput, TX_COMMON_FIELDS_WEIGHT,
 };
 use crate::ln::msgs;
 use crate::ln::msgs::{ClosingSigned, ClosingSignedFeeRange, DecodeError, OnionErrorPacket};
@@ -1734,11 +1733,11 @@ where
 		}
 	}
 
-	pub fn as_negotiating_channel(&mut self) -> Option<NegotiatingChannelView> {
+	pub fn interactive_tx_constructor_mut(&mut self) -> Option<&mut InteractiveTxConstructor> {
 		match &mut self.phase {
-			ChannelPhase::UnfundedV2(chan) => Some(chan.as_negotiating_channel()),
+			ChannelPhase::UnfundedV2(chan) => chan.interactive_tx_constructor.as_mut(),
 			#[cfg(splicing)]
-			ChannelPhase::Funded(chan) => chan.as_renegotiating_channel(),
+			ChannelPhase::Funded(chan) => chan.interactive_tx_constructor_mut(),
 			_ => None,
 		}
 	}
@@ -2954,62 +2953,6 @@ where
 					&counterparty_parameters.pubkeys.revocation_basepoint,
 				)
 			},
-		)
-	}
-}
-
-/// A short-lived subset view of a channel, used for V2 funding negotiation or re-negotiation.
-/// Can be produced by:
-/// - [`PendingV2Channel`], at V2 channel open, and
-/// - [`FundedChannel`], when splicing.
-pub(super) struct NegotiatingChannelView<'a>(&'a mut InteractiveTxConstructor);
-
-impl<'a> NegotiatingChannelView<'a> {
-	pub(super) fn tx_add_input(
-		&mut self, msg: &msgs::TxAddInput,
-	) -> InteractiveTxMessageSendResult {
-		InteractiveTxMessageSendResult(
-			self.0
-				.handle_tx_add_input(msg)
-				.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
-		)
-	}
-
-	pub(super) fn tx_add_output(
-		&mut self, msg: &msgs::TxAddOutput,
-	) -> InteractiveTxMessageSendResult {
-		InteractiveTxMessageSendResult(
-			self.0
-				.handle_tx_add_output(msg)
-				.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
-		)
-	}
-
-	pub(super) fn tx_remove_input(
-		&mut self, msg: &msgs::TxRemoveInput,
-	) -> InteractiveTxMessageSendResult {
-		InteractiveTxMessageSendResult(
-			self.0
-				.handle_tx_remove_input(msg)
-				.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
-		)
-	}
-
-	pub(super) fn tx_remove_output(
-		&mut self, msg: &msgs::TxRemoveOutput,
-	) -> InteractiveTxMessageSendResult {
-		InteractiveTxMessageSendResult(
-			self.0
-				.handle_tx_remove_output(msg)
-				.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
-		)
-	}
-
-	pub(super) fn tx_complete(&mut self, msg: &msgs::TxComplete) -> HandleTxCompleteResult {
-		HandleTxCompleteResult(
-			self.0
-				.handle_tx_complete(msg)
-				.map_err(|reason| reason.into_tx_abort_msg(msg.channel_id)),
 		)
 	}
 }
@@ -6174,9 +6117,8 @@ where
 		self.context.force_shutdown(&self.funding, closure_reason)
 	}
 
-	/// If we are in splicing/refunding, return a short-lived [`NegotiatingChannelView`].
 	#[cfg(splicing)]
-	fn as_renegotiating_channel(&mut self) -> Option<NegotiatingChannelView> {
+	fn interactive_tx_constructor_mut(&mut self) -> Option<&mut InteractiveTxConstructor> {
 		self.pending_splice
 			.as_mut()
 			.and_then(|pending_splice| pending_splice.funding_negotiation.as_mut())
@@ -6184,7 +6126,7 @@ where
 				if let FundingNegotiation::Pending(_, interactive_tx_constructor) =
 					funding_negotiation
 				{
-					Some(NegotiatingChannelView(interactive_tx_constructor))
+					Some(interactive_tx_constructor)
 				} else {
 					None
 				}
@@ -12609,11 +12551,6 @@ where
 	#[allow(dead_code)] // TODO(dual_funding): Remove once contribution to V2 channels is enabled.
 	pub fn get_accept_channel_v2_message(&self) -> msgs::AcceptChannelV2 {
 		self.generate_accept_channel_v2_message()
-	}
-
-	/// Return a short-lived [`NegotiatingChannelView`].
-	fn as_negotiating_channel(&mut self) -> NegotiatingChannelView {
-		NegotiatingChannelView(self.interactive_tx_constructor.as_mut().expect("TODO"))
 	}
 }
 
