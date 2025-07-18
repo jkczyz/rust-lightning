@@ -5919,15 +5919,15 @@ impl FundingNegotiationContext {
 	///   default destination address is used.
 	/// If error occurs, it is caused by our side, not the counterparty.
 	fn into_interactive_tx_constructor<SP: Deref, ES: Deref>(
-		self, context: &ChannelContext<SP>, funding: &FundingScope, is_splice: bool,
-		signer_provider: &SP, entropy_source: &ES, holder_node_id: PublicKey,
-		change_destination_opt: Option<ScriptBuf>, shared_funding_input: Option<SharedOwnedInput>,
+		self, context: &ChannelContext<SP>, funding: &FundingScope, signer_provider: &SP,
+		entropy_source: &ES, holder_node_id: PublicKey, change_destination_opt: Option<ScriptBuf>,
+		shared_funding_input: Option<SharedOwnedInput>,
 	) -> Result<InteractiveTxConstructor, AbortReason>
 	where
 		SP::Target: SignerProvider,
 		ES::Target: EntropySource,
 	{
-		if is_splice {
+		if shared_funding_input.is_some() {
 			debug_assert!(matches!(context.channel_state, ChannelState::ChannelReady(_)));
 		} else {
 			debug_assert!(matches!(context.channel_state, ChannelState::NegotiatingFunding(_)));
@@ -10532,7 +10532,6 @@ where
 			.into_interactive_tx_constructor(
 				&self.context,
 				&splice_funding,
-				true,
 				signer_provider,
 				entropy_source,
 				holder_node_id.clone(),
@@ -10664,7 +10663,6 @@ where
 			.into_interactive_tx_constructor(
 				&self.context,
 				&splice_funding,
-				true,
 				signer_provider,
 				entropy_source,
 				holder_node_id.clone(),
