@@ -1827,22 +1827,15 @@ where
 
 							return result;
 						} else {
+							// Replace the taken state
 							pending_splice.funding_negotiation = Some(funding_negotiation);
-							return Err(ChannelError::Warn(
-								"Got a transaction negotiation message in an invalid state"
-									.to_owned(),
-							));
 						}
-					} else {
-						return Err(ChannelError::Warn(
-							"Got a transaction negotiation message in an invalid state".to_owned(),
-						));
 					}
-				} else {
-					return Err(ChannelError::Warn(
-						"Got a transaction negotiation message in an invalid state".to_owned(),
-					));
 				}
+
+				return Err(ChannelError::Warn(
+					"Got a transaction negotiation message in an invalid state".to_owned(),
+				));
 			},
 			_ => {
 				return Err(ChannelError::Warn(
