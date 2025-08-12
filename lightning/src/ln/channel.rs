@@ -10575,7 +10575,7 @@ where
 			if !self.context.channel_state.is_their_tx_signatures_sent()
 				&& !session.has_received_commitment_signed()
 			{
-				return next_local_commitment_number + 1;
+				return next_local_commitment_number - 1;
 			}
 		}
 
