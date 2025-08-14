@@ -1258,7 +1258,7 @@ enum HolderCommitmentPoint {
 	/// signer is ready to provide the next commitment point.
 	PendingNext { transaction_number: u64, current: PublicKey },
 	/// Our current commitment point is ready and we've cached our next point.
-	Available { transaction_number: u64, current: PublicKey, next: PublicKey },
+	CachedNext { transaction_number: u64, current: PublicKey, next: PublicKey },
 }
 
 impl HolderCommitmentPoint {
@@ -1269,7 +1269,7 @@ impl HolderCommitmentPoint {
 		let current = signer.as_ref().get_per_commitment_point(INITIAL_COMMITMENT_NUMBER, secp_ctx).ok()?;
 		let next = signer.as_ref().get_per_commitment_point(INITIAL_COMMITMENT_NUMBER - 1, secp_ctx).ok();
 		let point = if let Some(next) = next {
-			HolderCommitmentPoint::Available { transaction_number: INITIAL_COMMITMENT_NUMBER, current, next }
+			HolderCommitmentPoint::CachedNext { transaction_number: INITIAL_COMMITMENT_NUMBER, current, next }
 		} else {
 			HolderCommitmentPoint::PendingNext { transaction_number: INITIAL_COMMITMENT_NUMBER, current }
 		};
@@ -1277,28 +1277,28 @@ impl HolderCommitmentPoint {
 	}
 
 	#[rustfmt::skip]
-	pub fn is_available(&self) -> bool {
-		if let HolderCommitmentPoint::Available { .. } = self { true } else { false }
+	pub fn is_next_available(&self) -> bool {
+		if let HolderCommitmentPoint::CachedNext { .. } = self { true } else { false }
 	}
 
 	pub fn transaction_number(&self) -> u64 {
 		match self {
 			HolderCommitmentPoint::PendingNext { transaction_number, .. } => *transaction_number,
-			HolderCommitmentPoint::Available { transaction_number, .. } => *transaction_number,
+			HolderCommitmentPoint::CachedNext { transaction_number, .. } => *transaction_number,
 		}
 	}
 
 	pub fn current_point(&self) -> PublicKey {
 		match self {
 			HolderCommitmentPoint::PendingNext { current, .. } => *current,
-			HolderCommitmentPoint::Available { current, .. } => *current,
+			HolderCommitmentPoint::CachedNext { current, .. } => *current,
 		}
 	}
 
 	pub fn next_point(&self) -> Option<PublicKey> {
 		match self {
 			HolderCommitmentPoint::PendingNext { .. } => None,
-			HolderCommitmentPoint::Available { next, .. } => Some(*next),
+			HolderCommitmentPoint::CachedNext { next, .. } => Some(*next),
 		}
 	}
 
@@ -1321,7 +1321,7 @@ impl HolderCommitmentPoint {
 					"Retrieved next per-commitment point {}",
 					*transaction_number - 1
 				);
-				*self = HolderCommitmentPoint::Available {
+				*self = HolderCommitmentPoint::CachedNext {
 					transaction_number: *transaction_number,
 					current: *current,
 					next,
@@ -1354,7 +1354,7 @@ impl HolderCommitmentPoint {
 		SP::Target: SignerProvider,
 		L::Target: Logger,
 	{
-		if let HolderCommitmentPoint::Available { transaction_number, next, .. } = self {
+		if let HolderCommitmentPoint::CachedNext { transaction_number, next, .. } = self {
 			*self = HolderCommitmentPoint::PendingNext {
 				transaction_number: *transaction_number - 1,
 				current: *next,
@@ -8437,7 +8437,7 @@ where
 	/// blocked.
 	#[rustfmt::skip]
 	pub fn signer_maybe_unblocked<L: Deref>(&mut self, logger: &L) -> SignerResumeUpdates where L::Target: Logger {
-		if !self.current_holder_commitment_point.is_available() {
+		if !self.current_holder_commitment_point.is_next_available() {
 			log_trace!(logger, "Attempting to update holder per-commitment point...");
 			self.current_holder_commitment_point.try_resolve_pending(&self.context.holder_signer, &self.context.secp_ctx, logger);
 		}
@@ -8538,7 +8538,7 @@ where
 		self.current_holder_commitment_point.try_resolve_pending(&self.context.holder_signer, &self.context.secp_ctx, logger);
 		let per_commitment_secret = self.context.holder_signer.as_ref()
 			.release_commitment_secret(self.current_holder_commitment_point.transaction_number() + 2).ok();
-		if let (HolderCommitmentPoint::Available { current, .. }, Some(per_commitment_secret)) =
+		if let (HolderCommitmentPoint::CachedNext { current, .. }, Some(per_commitment_secret)) =
 			(self.current_holder_commitment_point, per_commitment_secret) {
 			self.context.signer_pending_revoke_and_ack = false;
 			return Some(msgs::RevokeAndACK {
@@ -8549,7 +8549,7 @@ where
 				next_local_nonce: None,
 			})
 		}
-		if !self.current_holder_commitment_point.is_available() {
+		if !self.current_holder_commitment_point.is_next_available() {
 			log_trace!(logger, "Last revoke-and-ack pending in channel {} for sequence {} because the next per-commitment point is not available",
 				&self.context.channel_id(), self.current_holder_commitment_point.transaction_number());
 		}
@@ -10038,7 +10038,7 @@ where
 	fn get_channel_ready<L: Deref>(
 		&mut self, logger: &L
 	) -> Option<msgs::ChannelReady> where L::Target: Logger {
-		if let HolderCommitmentPoint::Available { current, .. } = self.current_holder_commitment_point {
+		if let HolderCommitmentPoint::CachedNext { current, .. } = self.current_holder_commitment_point {
 			self.context.signer_pending_channel_ready = false;
 			Some(msgs::ChannelReady {
 				channel_id: self.context.channel_id(),
@@ -12221,7 +12221,7 @@ where
 		}
 
 		let first_per_commitment_point = match self.unfunded_context.initial_holder_commitment_point {
-			Some(holder_commitment_point) if holder_commitment_point.is_available() => {
+			Some(holder_commitment_point) if holder_commitment_point.is_next_available() => {
 				self.signer_pending_open_channel = false;
 				holder_commitment_point.current_point()
 			},
@@ -12335,7 +12335,7 @@ where
 			self.unfunded_context.initial_holder_commitment_point = HolderCommitmentPoint::new(&self.context.holder_signer, &self.context.secp_ctx);
 		}
 		if let Some(ref mut point) = self.unfunded_context.initial_holder_commitment_point {
-			if !point.is_available() {
+			if !point.is_next_available() {
 				point.try_resolve_pending(&self.context.holder_signer, &self.context.secp_ctx, logger);
 			}
 		}
@@ -12495,7 +12495,7 @@ where
 		&mut self, _logger: &L
 	) -> Option<msgs::AcceptChannel> where L::Target: Logger {
 		let first_per_commitment_point = match self.unfunded_context.initial_holder_commitment_point {
-			Some(holder_commitment_point) if holder_commitment_point.is_available() => {
+			Some(holder_commitment_point) if holder_commitment_point.is_next_available() => {
 				self.signer_pending_accept_channel = false;
 				holder_commitment_point.current_point()
 			},
@@ -12619,7 +12619,7 @@ where
 			self.unfunded_context.initial_holder_commitment_point = HolderCommitmentPoint::new(&self.context.holder_signer, &self.context.secp_ctx);
 		}
 		if let Some(ref mut point) = self.unfunded_context.initial_holder_commitment_point {
-			if !point.is_available() {
+			if !point.is_next_available() {
 				point.try_resolve_pending(&self.context.holder_signer, &self.context.secp_ctx, logger);
 			}
 		}
@@ -14093,7 +14093,7 @@ where
 			cur_holder_commitment_point_opt,
 			next_holder_commitment_point_opt,
 		) {
-			(Some(current), Some(next)) => HolderCommitmentPoint::Available {
+			(Some(current), Some(next)) => HolderCommitmentPoint::CachedNext {
 				transaction_number: cur_holder_commitment_transaction_number,
 				current,
 				next,
@@ -14113,7 +14113,7 @@ where
 					.expect(
 						"Must be able to derive the next commitment point upon channel restoration",
 					);
-				HolderCommitmentPoint::Available {
+				HolderCommitmentPoint::CachedNext {
 					transaction_number: cur_holder_commitment_transaction_number,
 					current,
 					next,
