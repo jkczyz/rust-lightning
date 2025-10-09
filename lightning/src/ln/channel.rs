@@ -920,6 +920,7 @@ pub(super) enum ChannelError {
 	Ignore(String),
 	Warn(String),
 	WarnAndDisconnect(String),
+	Abort(AbortReason),
 	Close((String, ClosureReason)),
 	SendError(String),
 }
@@ -932,6 +933,7 @@ impl fmt::Debug for ChannelError {
 			&ChannelError::WarnAndDisconnect(ref e) => {
 				write!(f, "Disconnecting with warning: {}", e)
 			},
+			&ChannelError::Abort(ref reason) => write!(f, "Abort: {}", reason),
 			&ChannelError::Close((ref e, _)) => write!(f, "Close: {}", e),
 			&ChannelError::SendError(ref e) => write!(f, "Not Found: {}", e),
 		}
@@ -944,6 +946,7 @@ impl fmt::Display for ChannelError {
 			&ChannelError::Ignore(ref e) => write!(f, "{}", e),
 			&ChannelError::Warn(ref e) => write!(f, "{}", e),
 			&ChannelError::WarnAndDisconnect(ref e) => write!(f, "{}", e),
+			&ChannelError::Abort(ref reason) => write!(f, "{}", reason),
 			&ChannelError::Close((ref e, _)) => write!(f, "{}", e),
 			&ChannelError::SendError(ref e) => write!(f, "{}", e),
 		}
@@ -1680,7 +1683,7 @@ where
 
 	fn fail_interactive_tx_negotiation<L: Deref>(
 		&mut self, reason: AbortReason, logger: &L,
-	) -> (msgs::TxAbort, Option<SpliceFundingFailed>)
+	) -> (ChannelError, Option<SpliceFundingFailed>)
 	where
 		L::Target: Logger,
 	{
@@ -1704,91 +1707,90 @@ where
 			},
 		};
 
-		(reason.into_tx_abort_msg(self.context().channel_id), splice_funding_failed)
+		(ChannelError::Abort(reason), splice_funding_failed)
 	}
 
 	pub fn tx_add_input<L: Deref>(
 		&mut self, msg: &msgs::TxAddInput, logger: &L,
-	) -> Result<InteractiveTxMessageSend, (msgs::TxAbort, Option<SpliceFundingFailed>)>
+	) -> Result<InteractiveTxMessageSend, (ChannelError, Option<SpliceFundingFailed>)>
 	where
 		L::Target: Logger,
 	{
 		match self.interactive_tx_constructor_mut() {
-			Some(interactive_tx_constructor) => interactive_tx_constructor.handle_tx_add_input(msg),
-			None => Err(AbortReason::InternalError(
-				"Received unexpected interactive transaction negotiation message",
-			)),
+			Some(interactive_tx_constructor) => interactive_tx_constructor
+				.handle_tx_add_input(msg)
+				.map_err(|reason| self.fail_interactive_tx_negotiation(reason, logger)),
+			None => Err((ChannelError::WarnAndDisconnect(
+				"Received unexpected interactive transaction negotiation message".to_owned(),
+			), None)),
 		}
-		.map_err(|abort_reason| self.fail_interactive_tx_negotiation(abort_reason, logger))
 	}
 
 	pub fn tx_add_output<L: Deref>(
 		&mut self, msg: &msgs::TxAddOutput, logger: &L,
-	) -> Result<InteractiveTxMessageSend, (msgs::TxAbort, Option<SpliceFundingFailed>)>
+	) -> Result<InteractiveTxMessageSend, (ChannelError, Option<SpliceFundingFailed>)>
 	where
 		L::Target: Logger,
 	{
 		match self.interactive_tx_constructor_mut() {
-			Some(interactive_tx_constructor) => {
-				interactive_tx_constructor.handle_tx_add_output(msg)
-			},
-			None => Err(AbortReason::InternalError(
-				"Received unexpected interactive transaction negotiation message",
-			)),
+			Some(interactive_tx_constructor) => interactive_tx_constructor
+				.handle_tx_add_output(msg)
+				.map_err(|reason| self.fail_interactive_tx_negotiation(reason, logger)),
+			None => Err((ChannelError::WarnAndDisconnect(
+				"Received unexpected interactive transaction negotiation message".to_owned(),
+			), None)),
 		}
-		.map_err(|abort_reason| self.fail_interactive_tx_negotiation(abort_reason, logger))
 	}
 
 	pub fn tx_remove_input<L: Deref>(
 		&mut self, msg: &msgs::TxRemoveInput, logger: &L,
-	) -> Result<InteractiveTxMessageSend, (msgs::TxAbort, Option<SpliceFundingFailed>)>
+	) -> Result<InteractiveTxMessageSend, (ChannelError, Option<SpliceFundingFailed>)>
 	where
 		L::Target: Logger,
 	{
 		match self.interactive_tx_constructor_mut() {
-			Some(interactive_tx_constructor) => {
-				interactive_tx_constructor.handle_tx_remove_input(msg)
-			},
-			None => Err(AbortReason::InternalError(
-				"Received unexpected interactive transaction negotiation message",
-			)),
+			Some(interactive_tx_constructor) => interactive_tx_constructor
+				.handle_tx_remove_input(msg)
+				.map_err(|reason| self.fail_interactive_tx_negotiation(reason, logger)),
+			None => Err((ChannelError::WarnAndDisconnect(
+				"Received unexpected interactive transaction negotiation message".to_owned(),
+			), None)),
 		}
-		.map_err(|abort_reason| self.fail_interactive_tx_negotiation(abort_reason, logger))
 	}
 
 	pub fn tx_remove_output<L: Deref>(
 		&mut self, msg: &msgs::TxRemoveOutput, logger: &L,
-	) -> Result<InteractiveTxMessageSend, (msgs::TxAbort, Option<SpliceFundingFailed>)>
+	) -> Result<InteractiveTxMessageSend, (ChannelError, Option<SpliceFundingFailed>)>
 	where
 		L::Target: Logger,
 	{
 		match self.interactive_tx_constructor_mut() {
-			Some(interactive_tx_constructor) => {
-				interactive_tx_constructor.handle_tx_remove_output(msg)
-			},
-			None => Err(AbortReason::InternalError(
-				"Received unexpected interactive transaction negotiation message",
-			)),
+			Some(interactive_tx_constructor) => interactive_tx_constructor
+				.handle_tx_remove_output(msg)
+				.map_err(|reason| self.fail_interactive_tx_negotiation(reason, logger)),
+			None => Err((ChannelError::WarnAndDisconnect(
+				"Received unexpected interactive transaction negotiation message".to_owned(),
+			), None)),
 		}
-		.map_err(|abort_reason| self.fail_interactive_tx_negotiation(abort_reason, logger))
 	}
 
 	pub fn tx_complete<L: Deref>(
 		&mut self, msg: &msgs::TxComplete, logger: &L,
 	) -> Result<
 		(Option<InteractiveTxMessageSend>, Option<msgs::CommitmentSigned>),
-		(msgs::TxAbort, Option<SpliceFundingFailed>),
+		(ChannelError, Option<SpliceFundingFailed>),
 	>
 	where
 		L::Target: Logger,
 	{
 		let tx_complete_action = match self.interactive_tx_constructor_mut() {
-			Some(interactive_tx_constructor) => interactive_tx_constructor.handle_tx_complete(msg),
-			None => Err(AbortReason::InternalError(
-				"Received unexpected interactive transaction negotiation message",
-			)),
-		}
-		.map_err(|abort_reason| self.fail_interactive_tx_negotiation(abort_reason, logger))?;
+			Some(interactive_tx_constructor) => interactive_tx_constructor
+				.handle_tx_complete(msg)
+				.map_err(|reason| self.fail_interactive_tx_negotiation(reason, logger))?,
+			None => return Err((ChannelError::WarnAndDisconnect(
+				"Received unexpected interactive transaction negotiation message".to_owned(),
+			), None)),
+		};
 
 		let (interactive_tx_msg_send, negotiation_complete) = match tx_complete_action {
 			HandleTxCompleteValue::SendTxMessage(interactive_tx_msg_send) => {

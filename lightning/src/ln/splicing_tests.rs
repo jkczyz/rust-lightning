@@ -1083,6 +1083,46 @@ fn do_test_splice_reestablish(reload: bool, async_monitor_update: bool) {
 }
 
 #[test]
+fn disconnect_on_unexpected_interactive_tx_message() {
+	let chanmon_cfgs = create_chanmon_cfgs(2);
+	let node_cfgs = create_node_cfgs(2, &chanmon_cfgs);
+	let config = test_default_anchors_channel_config();
+	let node_chanmgrs = create_node_chanmgrs(2, &node_cfgs, &[Some(config.clone()), Some(config)]);
+	let nodes = create_network(2, &node_cfgs, &node_chanmgrs);
+
+	let initiator = &nodes[0];
+	let acceptor = &nodes[1];
+
+	let node_id_initiator = initiator.node.get_our_node_id();
+	let node_id_acceptor = acceptor.node.get_our_node_id();
+
+	let initial_channel_capacity = 100_000;
+	let (_, _, channel_id, _) =
+		create_announced_chan_between_nodes_with_value(&nodes, 0, 1, initial_channel_capacity, 0);
+
+	let coinbase_tx = provide_anchor_reserves(&nodes);
+	let splice_in_amount = initial_channel_capacity / 2;
+	let contribution = SpliceContribution::SpliceIn {
+		value: Amount::from_sat(splice_in_amount),
+		inputs: vec![FundingTxInput::new_p2wpkh(coinbase_tx, 0).unwrap()],
+		change_script: Some(nodes[0].wallet_source.get_change_script().unwrap()),
+	};
+
+	// Complete interactive-tx construction, but fail by having the acceptor send a duplicate
+	// tx_complete instead of commitment_signed.
+	let _ = negotiate_splice_tx(initiator, acceptor, channel_id, contribution.clone());
+
+	let mut msg_events = acceptor.node.get_and_clear_pending_msg_events();
+	assert_eq!(msg_events.len(), 1);
+	assert!(matches!(msg_events.remove(0), MessageSendEvent::UpdateHTLCs { .. }));
+
+	let tx_complete = msgs::TxComplete { channel_id };
+	initiator.node.handle_tx_complete(node_id_acceptor, &tx_complete);
+
+	let _warning = get_warning_msg(initiator, &node_id_acceptor);
+}
+
+#[test]
 fn fail_splice_on_interactive_tx_error() {
 	let chanmon_cfgs = create_chanmon_cfgs(2);
 	let node_cfgs = create_node_cfgs(2, &chanmon_cfgs);
@@ -1119,32 +1159,6 @@ fn fail_splice_on_interactive_tx_error() {
 	let _tx_complete =
 		get_event_msg!(acceptor, MessageSendEvent::SendTxComplete, node_id_initiator);
 	initiator.node.handle_tx_add_input(node_id_acceptor, &tx_add_input);
-
-	let event = get_event!(initiator, Event::SpliceFailed);
-	match event {
-		Event::SpliceFailed { contributed_inputs, .. } => {
-			assert_eq!(contributed_inputs.len(), 1);
-			assert_eq!(contributed_inputs[0], contribution.inputs()[0].outpoint());
-		},
-		_ => panic!("Expected Event::SpliceFailed"),
-	}
-
-	let tx_abort = get_event_msg!(initiator, MessageSendEvent::SendTxAbort, node_id_acceptor);
-	acceptor.node.handle_tx_abort(node_id_initiator, &tx_abort);
-
-	let tx_abort = get_event_msg!(acceptor, MessageSendEvent::SendTxAbort, node_id_initiator);
-	initiator.node.handle_tx_abort(node_id_acceptor, &tx_abort);
-
-	// Complete interactive-tx construction, but fail by having the acceptor send a duplicate
-	// tx_complete instead of commitment_signed.
-	let _ = negotiate_splice_tx(initiator, acceptor, channel_id, contribution.clone());
-
-	let mut msg_events = acceptor.node.get_and_clear_pending_msg_events();
-	assert_eq!(msg_events.len(), 1);
-	assert!(matches!(msg_events.remove(0), MessageSendEvent::UpdateHTLCs { .. }));
-
-	let tx_complete = msgs::TxComplete { channel_id };
-	initiator.node.handle_tx_complete(node_id_acceptor, &tx_complete);
 
 	let event = get_event!(initiator, Event::SpliceFailed);
 	match event {

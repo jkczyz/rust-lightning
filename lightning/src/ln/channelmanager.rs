@@ -932,6 +932,7 @@ struct MsgHandleErrInternal {
 	err: msgs::LightningError,
 	closes_channel: bool,
 	shutdown_finish: Option<(ShutdownResult, Option<msgs::ChannelUpdate>)>,
+	tx_abort: Option<msgs::TxAbort>,
 }
 impl MsgHandleErrInternal {
 	fn send_err_msg_no_close(err: String, channel_id: ChannelId) -> Self {
@@ -944,11 +945,12 @@ impl MsgHandleErrInternal {
 			},
 			closes_channel: false,
 			shutdown_finish: None,
+			tx_abort: None,
 		}
 	}
 
 	fn from_no_close(err: msgs::LightningError) -> Self {
-		Self { err, closes_channel: false, shutdown_finish: None }
+		Self { err, closes_channel: false, shutdown_finish: None, tx_abort: None }
 	}
 
 	fn from_finish_shutdown(
@@ -968,10 +970,15 @@ impl MsgHandleErrInternal {
 			err: LightningError { err, action },
 			closes_channel: true,
 			shutdown_finish: Some((shutdown_res, channel_update)),
+			tx_abort: None,
 		}
 	}
 
 	fn from_chan_no_close(err: ChannelError, channel_id: ChannelId) -> Self {
+		let tx_abort = match &err {
+			&ChannelError::Abort(reason) => Some(reason.into_tx_abort_msg(channel_id)),
+			_ => None,
+		};
 		let err = match err {
 			ChannelError::Warn(msg) => LightningError {
 				err: msg.clone(),
@@ -989,6 +996,9 @@ impl MsgHandleErrInternal {
 			ChannelError::Ignore(msg) => {
 				LightningError { err: msg, action: msgs::ErrorAction::IgnoreError }
 			},
+			ChannelError::Abort(reason) => {
+				LightningError { err: reason.to_string(), action: msgs::ErrorAction::IgnoreError }
+			},
 			ChannelError::Close((msg, _)) | ChannelError::SendError(msg) => LightningError {
 				err: msg.clone(),
 				action: msgs::ErrorAction::SendErrorMessage {
@@ -996,7 +1006,7 @@ impl MsgHandleErrInternal {
 				},
 			},
 		};
-		Self { err, closes_channel: false, shutdown_finish: None }
+		Self { err, closes_channel: false, shutdown_finish: None, tx_abort }
 	}
 
 	fn dont_send_error_message(&mut self) {
@@ -3211,7 +3221,7 @@ macro_rules! handle_error {
 
 		match $internal {
 			Ok(msg) => Ok(msg),
-			Err(MsgHandleErrInternal { err, shutdown_finish, .. }) => {
+			Err(MsgHandleErrInternal { err, shutdown_finish, tx_abort, .. }) => {
 				let mut msg_event = None;
 
 				if let Some((shutdown_res, update_option)) = shutdown_finish {
@@ -3234,6 +3244,12 @@ macro_rules! handle_error {
 				}
 
 				if let msgs::ErrorAction::IgnoreError = err.action {
+					if let Some(tx_abort) = tx_abort {
+						msg_event = Some(MessageSendEvent::SendTxAbort {
+							node_id: $counterparty_node_id,
+							msg: tx_abort,
+						});
+					}
 				} else {
 					msg_event = Some(MessageSendEvent::HandleError {
 						node_id: $counterparty_node_id,
@@ -3330,6 +3346,9 @@ macro_rules! convert_channel_err {
 			},
 			ChannelError::Ignore(msg) => {
 				(false, MsgHandleErrInternal::from_chan_no_close(ChannelError::Ignore(msg), $channel_id))
+			},
+			ChannelError::Abort(reason) => {
+				(false, MsgHandleErrInternal::from_chan_no_close(ChannelError::Abort(reason), $channel_id))
 			},
 			ChannelError::Close((msg, reason)) => {
 				let (mut shutdown_res, chan_update) = $close(reason);
@@ -10273,7 +10292,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 	fn internal_tx_msg<
 		HandleTxMsgFn: Fn(
 			&mut Channel<SP>,
-		) -> Result<InteractiveTxMessageSend, (msgs::TxAbort, Option<SpliceFundingFailed>)>,
+		) -> Result<InteractiveTxMessageSend, (ChannelError, Option<SpliceFundingFailed>)>,
 	>(
 		&self, counterparty_node_id: &PublicKey, channel_id: ChannelId,
 		tx_msg_handler: HandleTxMsgFn,
@@ -10297,11 +10316,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 						peer_state.pending_msg_events.push(msg_send_event);
 						Ok(NotifyOption::SkipPersistHandleEvents)
 					},
-					Err((tx_abort, splice_funding_failed)) => {
-						peer_state.pending_msg_events.push(MessageSendEvent::SendTxAbort {
-							node_id: *counterparty_node_id,
-							msg: tx_abort,
-						});
+					Err((error, splice_funding_failed)) => {
 						if let Some(splice_funding_failed) = splice_funding_failed {
 							let pending_events = &mut self.pending_events.lock().unwrap();
 							pending_events.push_back((events::Event::SpliceFailed {
@@ -10313,10 +10328,9 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 								contributed_inputs: splice_funding_failed.contributed_inputs,
 								contributed_outputs: splice_funding_failed.contributed_outputs,
 							}, None));
-							Ok(NotifyOption::DoPersist)
-						} else {
-							Ok(NotifyOption::SkipPersistHandleEvents)
 						}
+						// FIXME: Should persist if a SpliceFailed event was pushed
+						Err(MsgHandleErrInternal::from_chan_no_close(error, channel_id))
 					},
 				}
 			},
@@ -10403,11 +10417,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 						}
 						Ok(persist)
 					},
-					Err((tx_abort, splice_funding_failed)) => {
-						peer_state.pending_msg_events.push(MessageSendEvent::SendTxAbort {
-							node_id: counterparty_node_id,
-							msg: tx_abort,
-						});
+					Err((error, splice_funding_failed)) => {
 						if let Some(splice_funding_failed) = splice_funding_failed {
 							let pending_events = &mut self.pending_events.lock().unwrap();
 							pending_events.push_back((events::Event::SpliceFailed {
@@ -10419,10 +10429,9 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 								contributed_inputs: splice_funding_failed.contributed_inputs,
 								contributed_outputs: splice_funding_failed.contributed_outputs,
 							}, None));
-							Ok(NotifyOption::DoPersist)
-						} else {
-							Ok(NotifyOption::SkipPersistHandleEvents)
 						}
+						// FIXME: Should persist if a SpliceFailed event was pushed
+						Err(MsgHandleErrInternal::from_chan_no_close(error, msg.channel_id))
 					},
 				}
 			},
