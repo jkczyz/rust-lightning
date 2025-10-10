@@ -16139,13 +16139,15 @@ where
 		// be failed upon reload. However, as the necessary information for the SpliceFailed event
 		// is not persisted, the event itself needs to be persisted even though it hasn't been
 		// emitted yet. These are removed after the events are written.
-		let mut events = self.pending_events.lock().unwrap();
-		let event_count = events.len();
-		for peer_state in peer_states.iter() {
-			for chan in peer_state.channel_by_id.values().filter_map(Channel::as_funded) {
-				if let Some(splice_funding_failed) = chan.maybe_splice_funding_failed() {
-					events.push_back((
-						events::Event::SpliceFailed {
+		let events = self.pending_events.lock().unwrap();
+		let splice_failed_events_iter = || {
+			peer_states
+				.iter()
+				.flat_map(|peer_state| peer_state.channel_by_id.values())
+				.filter_map(Channel::as_funded)
+				.filter_map(|chan| {
+					chan.maybe_splice_funding_failed()
+						.map(|splice_funding_failed| (events::Event::SpliceFailed {
 							channel_id: chan.context.channel_id(),
 							counterparty_node_id: chan.context.get_counterparty_node_id(),
 							user_channel_id: chan.context.get_user_id(),
@@ -16153,12 +16155,9 @@ where
 							channel_type: splice_funding_failed.channel_type,
 							contributed_inputs: splice_funding_failed.contributed_inputs,
 							contributed_outputs: splice_funding_failed.contributed_outputs,
-						},
-						None,
-					));
-				}
-			}
-		}
+						}, None))
+				})
+		};
 
 		// LDK versions prior to 0.0.115 don't support post-event actions, thus if there's no
 		// actions at all, skip writing the required TLV. Otherwise, pre-0.0.115 versions will
@@ -16169,8 +16168,12 @@ where
 			// well save the space and not write any events here.
 			0u64.write(writer)?;
 		} else {
-			(events.len() as u64).write(writer)?;
+			let event_count = events.len() + splice_failed_events_iter().count();
+			(event_count as u64).write(writer)?;
 			for (event, _) in events.iter() {
+				event.write(writer)?;
+			}
+			for (event, _) in splice_failed_events_iter() {
 				event.write(writer)?;
 			}
 		}
@@ -16256,6 +16259,9 @@ where
 			}
 		}
 
+		let splice_failed_events_iter: Option<crate::util::ser::IterableOwned<_, (events::Event, Option<EventCompletionAction>)>> = events_not_backwards_compatible
+			.then(|| crate::util::ser::IterableOwned(splice_failed_events_iter()));
+
 		write_tlv_fields!(writer, {
 			(1, pending_outbound_payments_no_retry, required),
 			(2, pending_intercepted_htlcs, option),
@@ -16268,6 +16274,7 @@ where
 			(9, htlc_purposes, required_vec),
 			(10, legacy_in_flight_monitor_updates, option),
 			(11, self.probing_cookie_secret, required),
+			(12, splice_failed_events_iter, option),
 			(13, htlc_onion_fields, optional_vec),
 			(14, decode_update_add_htlcs_opt, option),
 			(15, self.inbound_payment_id_secret, required),
@@ -16275,9 +16282,6 @@ where
 			(19, peer_storage_dir, optional_vec),
 			(21, WithoutLength(&self.flow.writeable_async_receive_offer_cache()), required),
 		});
-
-		// Remove the SpliceFailed events added earlier.
-		events.truncate(event_count);
 
 		Ok(())
 	}
@@ -16961,7 +16965,8 @@ where
 		let mut pending_claiming_payments = Some(new_hash_map());
 		let mut monitor_update_blocked_actions_per_peer: Option<Vec<(_, BTreeMap<_, Vec<_>>)>> =
 			Some(Vec::new());
-		let mut events_override = None;
+		let mut events_override: Option<VecDeque<_>> = None;
+		let mut splice_failed_events: Option<VecDeque<_>> = None;
 		let mut legacy_in_flight_monitor_updates: Option<
 			HashMap<(PublicKey, OutPoint), Vec<ChannelMonitorUpdate>>,
 		> = None;
@@ -16986,6 +16991,7 @@ where
 			(9, claimable_htlc_purposes, optional_vec),
 			(10, legacy_in_flight_monitor_updates, option),
 			(11, probing_cookie_secret, option),
+			(12, splice_failed_events, option),
 			(13, claimable_htlc_onion_fields, optional_vec),
 			(14, decode_update_add_htlcs, option),
 			(15, inbound_payment_id_secret, option),
@@ -17007,7 +17013,10 @@ where
 			inbound_payment_id_secret = Some(args.entropy_source.get_secure_random_bytes());
 		}
 
-		if let Some(events) = events_override {
+		if let Some(mut events) = events_override {
+			if let Some(splice_failed_events) = splice_failed_events {
+				events.extend(splice_failed_events);
+			}
 			pending_events_read = events;
 		}
 
