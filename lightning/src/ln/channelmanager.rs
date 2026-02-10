@@ -12689,9 +12689,6 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 		let mut peer_state_lock = peer_state_mutex.lock().unwrap();
 		let peer_state = &mut *peer_state_lock;
 
-		// TODO(splicing): Currently not possible to contribute on the splicing-acceptor side
-		let our_funding_contribution = 0i64;
-
 		// Look for the channel
 		match peer_state.channel_by_id.entry(msg.channel_id) {
 			hash_map::Entry::Vacant(_) => return Err(MsgHandleErrInternal::send_err_msg_no_close(format!(
@@ -12708,7 +12705,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 
 				if let Some(ref mut funded_channel) = chan_entry.get_mut().as_funded_mut() {
 					let init_res = funded_channel.splice_init(
-						msg, our_funding_contribution, &self.signer_provider, &self.entropy_source,
+						msg, &self.signer_provider, &self.entropy_source,
 						&self.get_our_node_id(), &self.logger
 					);
 					let splice_ack_msg = try_channel_entry!(self, peer_state, init_res, chan_entry);
