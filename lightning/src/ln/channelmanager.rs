@@ -12705,7 +12705,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 
 				if let Some(ref mut funded_channel) = chan_entry.get_mut().as_funded_mut() {
 					let init_res = funded_channel.splice_init(
-						msg, &self.signer_provider, &self.entropy_source,
+						msg, &self.entropy_source,
 						&self.get_our_node_id(), &self.logger
 					);
 					let splice_ack_msg = try_channel_entry!(self, peer_state, init_res, chan_entry);
@@ -12742,7 +12742,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 			hash_map::Entry::Occupied(mut chan_entry) => {
 				if let Some(ref mut funded_channel) = chan_entry.get_mut().as_funded_mut() {
 					let splice_ack_res = funded_channel.splice_ack(
-						msg, &self.signer_provider, &self.entropy_source,
+						msg, &self.entropy_source,
 						&self.get_our_node_id(), &self.logger
 					);
 					let tx_msg_opt = try_channel_entry!(self, peer_state, splice_ack_res, chan_entry);
