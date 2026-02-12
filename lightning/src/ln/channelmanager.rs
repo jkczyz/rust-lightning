@@ -64,7 +64,7 @@ use crate::ln::channel::{
 	WithChannelContext,
 };
 use crate::ln::channel_state::ChannelDetails;
-use crate::ln::funding::{FundingContribution, SpliceContribution};
+use crate::ln::funding::{FundingContribution, FundingTemplate};
 use crate::ln::inbound_payment;
 use crate::ln::interactivetxs::InteractiveTxMessageSend;
 use crate::ln::msgs;
@@ -4545,15 +4545,16 @@ impl<
 	///
 	/// # Arguments
 	///
-	/// Provide a `contribution` to determine if value is spliced in or out. The splice initiator is
-	/// responsible for paying fees for common fields, shared inputs, and shared outputs along with
-	/// any contributed inputs and outputs. Fees are determined using `feerate` and must be covered
-	/// by the supplied inputs for splice-in or the channel balance for splice-out.
+	/// The splice initiator is responsible for paying fees for common fields, shared inputs, and
+	/// shared outputs along with any contributed inputs and outputs. Fees are determined using
+	/// `feerate` and must be covered by the supplied inputs for splice-in or the channel balance
+	/// for splice-out.
+	///
+	/// Returns a [`FundingTemplate`] which should be used to build a [`FundingContribution`] via
+	/// one of its splice methods (e.g., [`FundingTemplate::splice_in_sync`]). The resulting
+	/// contribution must then be passed to [`ChannelManager::funding_contributed`].
 	///
 	/// # Events
-	///
-	/// [`Event::FundingNeeded`] will be generated upon success and must be handled for the splice
-	/// to be initiated.
 	///
 	/// Once the funding transaction has been constructed, an [`Event::SplicePending`] will be
 	/// emitted. At this point, any inputs contributed to the splice can only be re-spent if an
@@ -4569,29 +4570,27 @@ impl<
 	/// Once the splice has been locked by both counterparties, an [`Event::ChannelReady`] will be
 	/// emitted with the new funding output. At this point, a new splice can be negotiated by
 	/// calling `splice_channel` again on this channel.
+	///
+	/// [`FundingContribution`]: crate::ln::funding::FundingContribution
 	#[rustfmt::skip]
 	pub fn splice_channel(
 		&self, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
-		contribution: SpliceContribution, feerate: FeeRate,
-	) -> Result<(), APIError> {
-		let mut res = Ok(());
+		feerate: FeeRate,
+	) -> Result<FundingTemplate, APIError> {
+		let mut res = Err(APIError::APIMisuseError { err: String::new() });
 		PersistenceNotifierGuard::optionally_notify(self, || {
 			let result = self.internal_splice_channel(
-				channel_id, counterparty_node_id, contribution, feerate,
+				channel_id, counterparty_node_id, feerate,
 			);
 			res = result;
-			match res {
-				Ok(_) => NotifyOption::DoPersist,
-				Err(_) => NotifyOption::SkipPersistNoEvents,
-			}
+			NotifyOption::SkipPersistNoEvents
 		});
 		res
 	}
 
 	fn internal_splice_channel(
-		&self, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
-		contribution: SpliceContribution, feerate: FeeRate,
-	) -> Result<(), APIError> {
+		&self, channel_id: &ChannelId, counterparty_node_id: &PublicKey, feerate: FeeRate,
+	) -> Result<FundingTemplate, APIError> {
 		let per_peer_state = self.per_peer_state.read().unwrap();
 
 		let peer_state_mutex = match per_peer_state.get(counterparty_node_id).ok_or_else(|| {
@@ -4619,42 +4618,7 @@ impl<
 		match peer_state.channel_by_id.entry(*channel_id) {
 			hash_map::Entry::Occupied(mut chan_phase_entry) => {
 				if let Some(chan) = chan_phase_entry.get_mut().as_funded_mut() {
-					let pending_events = self.pending_events.lock().unwrap();
-					let awaiting_splice_funding = pending_events
-						.iter()
-						.find(|(event, _)| {
-							matches!(
-								event,
-								events::Event::FundingNeeded {
-									channel_id: splice_channel_id,
-									counterparty_node_id: splice_counterparty_node_id,
-									..
-								} if splice_channel_id == channel_id && splice_counterparty_node_id == counterparty_node_id)
-						})
-						.is_some();
-					drop(pending_events);
-
-					if awaiting_splice_funding {
-						return Err(APIError::APIMisuseError {
-							err: format!(
-								"Already awaiting splice funding for channel {}",
-								channel_id
-							),
-						});
-					}
-
-					let funding_template = chan.splice_channel(contribution, feerate)?;
-					let mut pending_events = self.pending_events.lock().unwrap();
-					pending_events.push_back((
-						events::Event::FundingNeeded {
-							channel_id: chan.context.channel_id(),
-							user_channel_id: chan.context.get_user_id(),
-							counterparty_node_id: chan.context.get_counterparty_node_id(),
-							funding_template,
-						},
-						None,
-					));
-					Ok(())
+					chan.splice_channel(feerate)
 				} else {
 					Err(APIError::ChannelUnavailable {
 						err: format!(
@@ -6380,9 +6344,9 @@ impl<
 
 	/// Adds or removes funds from the given channel as specified by a [`FundingContribution`].
 	///
-	/// Used to handle an [`Event::FundingNeeded`] by constructing a [`FundingContribution`] from a
-	/// [`FundingTemplate`] and passing it here. See [`FundingTemplate::build`] and
-	/// [`FundingTemplate::build_sync`].
+	/// Used after [`ChannelManager::splice_channel`] by constructing a [`FundingContribution`]
+	/// from the returned [`FundingTemplate`] and passing it here. See
+	/// [`FundingTemplate::splice_in_sync`] and other splice methods on [`FundingTemplate`].
 	///
 	/// Calling this method will commence the process of creating a new funding transaction for the
 	/// channel. An [`Event::FundingTransactionReadyForSigning`] will be generated once the

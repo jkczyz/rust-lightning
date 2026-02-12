@@ -31,8 +31,6 @@ use bitcoin::hashes::Hash as _;
 use bitcoin::hex::FromHex;
 use bitcoin::WPubkeyHash;
 
-use lightning::ln::funding::SpliceContribution;
-
 use lightning::blinded_path::message::{BlindedMessagePath, MessageContext, MessageForwardNode};
 use lightning::blinded_path::payment::{BlindedPaymentPath, ReceiveTlvs};
 use lightning::chain;
@@ -1032,15 +1030,22 @@ pub fn do_test(mut data: &[u8], logger: &Arc<dyn Logger + MaybeSend + MaybeSync>
 				if splice_in_sats == 0 {
 					continue;
 				}
-				let contribution = SpliceContribution::splice_in(
-					Amount::from_sat(splice_in_sats.min(900_000)), // Cap at available funds minus fees
-				);
-				let _ = channelmanager.splice_channel(
+				let value_added = Amount::from_sat(splice_in_sats.min(900_000));
+				if let Ok(funding_template) = channelmanager.splice_channel(
 					&chan.channel_id,
 					&chan.counterparty.node_id,
-					contribution,
 					FeeRate::from_sat_per_kwu(253),
-				);
+				) {
+					let wallet_sync = WalletSync::new(&wallet, Arc::clone(&logger));
+					if let Ok(contribution) = funding_template.splice_in_sync(value_added, &wallet_sync) {
+						let _ = channelmanager.funding_contributed(
+							&chan.channel_id,
+							&chan.counterparty.node_id,
+							contribution,
+							None,
+						);
+					}
+				}
 			},
 			// Splice-out: remove funds from a channel
 			51 => {
@@ -1062,16 +1067,25 @@ pub fn do_test(mut data: &[u8], logger: &Arc<dyn Logger + MaybeSend + MaybeSync>
 				// Cap splice-out at a reasonable portion of channel capacity
 				let max_splice_out = chan.channel_value_satoshis / 4;
 				let splice_out_sats = splice_out_sats.min(max_splice_out).max(546); // At least dust limit
-				let contribution = SpliceContribution::splice_out(vec![TxOut {
+				let outputs = vec![TxOut {
 					value: Amount::from_sat(splice_out_sats),
 					script_pubkey: wallet.get_change_script().unwrap(),
-				}]);
-				let _ = channelmanager.splice_channel(
+				}];
+				if let Ok(funding_template) = channelmanager.splice_channel(
 					&chan.channel_id,
 					&chan.counterparty.node_id,
-					contribution,
 					FeeRate::from_sat_per_kwu(253),
-				);
+				) {
+					let wallet_sync = WalletSync::new(&wallet, Arc::clone(&logger));
+					if let Ok(contribution) = funding_template.splice_out_sync(outputs, &wallet_sync) {
+						let _ = channelmanager.funding_contributed(
+							&chan.channel_id,
+							&chan.counterparty.node_id,
+							contribution,
+							None,
+						);
+					}
+				}
 			},
 			_ => return,
 		}
@@ -1100,21 +1114,6 @@ pub fn do_test(mut data: &[u8], logger: &Arc<dyn Logger + MaybeSend + MaybeSync>
 					if !intercepted_htlcs.contains(&intercept_id) {
 						intercepted_htlcs.push(intercept_id);
 					}
-				},
-				Event::FundingNeeded {
-					channel_id, counterparty_node_id, funding_template, ..
-				} => {
-					let wallet = WalletSync::new(&wallet, Arc::clone(&logger));
-					let contribution = funding_template.build_sync(&wallet).unwrap();
-					let locktime = None;
-					channelmanager
-						.funding_contributed(
-							&channel_id,
-							&counterparty_node_id,
-							contribution,
-							locktime,
-						)
-						.unwrap();
 				},
 				Event::FundingTransactionReadyForSigning {
 					channel_id,

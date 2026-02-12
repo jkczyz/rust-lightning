@@ -29,77 +29,17 @@ use crate::util::wallet_utils::{
 	CoinSelection, CoinSelectionSource, CoinSelectionSourceSync, Input,
 };
 
-/// The components of a splice's funding transaction that are contributed by one party.
-#[derive(Debug, Clone)]
-pub struct SpliceContribution {
-	/// The amount of value to contribute from inputs to the splice's funding transaction.
-	///
-	/// If `value_added` is [`Amount::ZERO`], then any fees will be deducted from the channel
-	/// balance instead of paid by inputs.
-	value_added: Amount,
-
-	/// The outputs to include in the splice's funding transaction, whose amounts will be deducted
-	/// from the channel balance.
-	outputs: Vec<TxOut>,
-}
-
-impl SpliceContribution {
-	/// Creates a contribution for when funds are only added to a channel.
-	pub fn splice_in(value_added: Amount) -> Self {
-		Self { value_added, outputs: vec![] }
-	}
-
-	/// Creates a contribution for when funds are only removed from a channel.
-	pub fn splice_out(outputs: Vec<TxOut>) -> Self {
-		Self { value_added: Amount::ZERO, outputs }
-	}
-
-	/// Creates a contribution for when funds are both added to and removed from a channel.
-	///
-	/// Note that `value_added` represents the value added by `inputs` but should not account for
-	/// value removed by `outputs`. The net value contributed can be obtained by calling
-	/// [`SpliceContribution::net_value`].
-	pub fn splice_in_and_out(value_added: Amount, outputs: Vec<TxOut>) -> Self {
-		Self { value_added, outputs }
-	}
-
-	/// The net value contributed to a channel by the splice. If negative, more value will be
-	/// spliced out than spliced in.
-	pub fn net_value(&self) -> SignedAmount {
-		let value_added = self.value_added.to_signed().unwrap_or(SignedAmount::MAX);
-		let value_removed = self
-			.outputs
-			.iter()
-			.map(|txout| txout.value)
-			.sum::<Amount>()
-			.to_signed()
-			.unwrap_or(SignedAmount::MAX);
-
-		value_added - value_removed
-	}
-}
-
 /// A template for contributing to a channel's splice funding transaction.
 ///
-/// This is included in an [`Event::FundingNeeded`] when a channel is ready to be spliced. It
-/// contains information passed as a [`SpliceContribution`] to [`ChannelManager::splice_channel`].
-/// It must be converted to a [`FundingContribution`] and passed to
-/// [`ChannelManager::funding_contributed`] in order to resume the splicing process.
+/// This is returned from [`ChannelManager::splice_channel`] when a channel is ready to be
+/// spliced. It must be converted to a [`FundingContribution`] using one of the splice methods
+/// and passed to [`ChannelManager::funding_contributed`] in order to resume the splicing
+/// process.
 ///
-/// [`Event::FundingNeeded`]: crate::events::Event::FundingNeeded
 /// [`ChannelManager::splice_channel`]: crate::ln::channelmanager::ChannelManager::splice_channel
 /// [`ChannelManager::funding_contributed`]: crate::ln::channelmanager::ChannelManager::funding_contributed
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FundingTemplate {
-	/// The amount to contribute to the channel.
-	///
-	/// If `value_added` is [`Amount::ZERO`], then any fees will be deducted from the channel
-	/// balance instead of paid by inputs.
-	value_added: Amount,
-
-	/// The outputs to contribute to the funding transaction, excluding change.
-	outputs: Vec<TxOut>,
-
 	/// The shared input, which, if present indicates the funding template is for a splice funding
 	/// transaction.
 	shared_input: Option<Input>,
@@ -114,17 +54,18 @@ pub struct FundingTemplate {
 
 impl FundingTemplate {
 	/// Constructs a [`FundingTemplate`] for a splice using the provided shared input.
-	pub(super) fn for_splice(
-		contribution: SpliceContribution, shared_input: Input, feerate: FeeRate,
-	) -> Self {
-		let SpliceContribution { value_added, outputs } = contribution;
-		Self { value_added, outputs, shared_input: Some(shared_input), feerate, is_initiator: true }
+	pub(super) fn new(shared_input: Option<Input>, feerate: FeeRate, is_initiator: bool) -> Self {
+		Self { shared_input, feerate, is_initiator }
 	}
 }
 
 macro_rules! build_funding_contribution {
-    ($self:ident, $wallet:ident, $($await:tt)*) => {{
-		let FundingTemplate { value_added, outputs, shared_input, feerate, is_initiator } = $self;
+    ($value_added:expr, $outputs:expr, $shared_input:expr, $feerate:expr, $is_initiator:expr, $wallet:ident, $($await:tt)*) => {{
+		let value_added: Amount = $value_added;
+		let outputs: Vec<TxOut> = $outputs;
+		let shared_input: Option<Input> = $shared_input;
+		let feerate: FeeRate = $feerate;
+		let is_initiator: bool = $is_initiator;
 
 		let value_removed = outputs.iter().map(|txout| txout.value).sum();
 		let is_splice = shared_input.is_some();
@@ -182,22 +123,115 @@ macro_rules! build_funding_contribution {
 }
 
 impl FundingTemplate {
-	/// Creates a `FundingContribution` from the template by using `wallet` to perform coin
-	/// selection with the given fee rate.
-	pub async fn build<W: Deref + MaybeSend>(self, wallet: W) -> Result<FundingContribution, ()>
+	/// Creates a [`FundingContribution`] for adding funds to a channel using `wallet` to perform
+	/// coin selection.
+	pub async fn splice_in<W: Deref + MaybeSend>(
+		self, value_added: Amount, wallet: W,
+	) -> Result<FundingContribution, ()>
 	where
 		W::Target: CoinSelectionSource + MaybeSend,
 	{
-		build_funding_contribution!(self, wallet, await)
+		if value_added == Amount::ZERO {
+			return Err(());
+		}
+		let FundingTemplate { shared_input, feerate, is_initiator } = self;
+		build_funding_contribution!(value_added, vec![], shared_input, feerate, is_initiator, wallet, await)
 	}
 
-	/// Creates a `FundingContribution` from the template by using `wallet` to perform coin
-	/// selection with the given fee rate.
-	pub fn build_sync<W: Deref>(self, wallet: W) -> Result<FundingContribution, ()>
+	/// Creates a [`FundingContribution`] for adding funds to a channel using `wallet` to perform
+	/// coin selection.
+	pub fn splice_in_sync<W: Deref>(
+		self, value_added: Amount, wallet: W,
+	) -> Result<FundingContribution, ()>
 	where
 		W::Target: CoinSelectionSourceSync,
 	{
-		build_funding_contribution!(self, wallet,)
+		if value_added == Amount::ZERO {
+			return Err(());
+		}
+		let FundingTemplate { shared_input, feerate, is_initiator } = self;
+		build_funding_contribution!(
+			value_added,
+			vec![],
+			shared_input,
+			feerate,
+			is_initiator,
+			wallet,
+		)
+	}
+
+	/// Creates a [`FundingContribution`] for removing funds from a channel using `wallet` to
+	/// perform coin selection.
+	pub async fn splice_out<W: Deref + MaybeSend>(
+		self, outputs: Vec<TxOut>, wallet: W,
+	) -> Result<FundingContribution, ()>
+	where
+		W::Target: CoinSelectionSource + MaybeSend,
+	{
+		if outputs.is_empty() {
+			return Err(());
+		}
+		let FundingTemplate { shared_input, feerate, is_initiator } = self;
+		build_funding_contribution!(Amount::ZERO, outputs, shared_input, feerate, is_initiator, wallet, await)
+	}
+
+	/// Creates a [`FundingContribution`] for removing funds from a channel using `wallet` to
+	/// perform coin selection.
+	pub fn splice_out_sync<W: Deref>(
+		self, outputs: Vec<TxOut>, wallet: W,
+	) -> Result<FundingContribution, ()>
+	where
+		W::Target: CoinSelectionSourceSync,
+	{
+		if outputs.is_empty() {
+			return Err(());
+		}
+		let FundingTemplate { shared_input, feerate, is_initiator } = self;
+		build_funding_contribution!(
+			Amount::ZERO,
+			outputs,
+			shared_input,
+			feerate,
+			is_initiator,
+			wallet,
+		)
+	}
+
+	/// Creates a [`FundingContribution`] for both adding and removing funds from a channel using
+	/// `wallet` to perform coin selection.
+	pub async fn splice_in_and_out<W: Deref + MaybeSend>(
+		self, value_added: Amount, outputs: Vec<TxOut>, wallet: W,
+	) -> Result<FundingContribution, ()>
+	where
+		W::Target: CoinSelectionSource + MaybeSend,
+	{
+		if value_added == Amount::ZERO && outputs.is_empty() {
+			return Err(());
+		}
+		let FundingTemplate { shared_input, feerate, is_initiator } = self;
+		build_funding_contribution!(value_added, outputs, shared_input, feerate, is_initiator, wallet, await)
+	}
+
+	/// Creates a [`FundingContribution`] for both adding and removing funds from a channel using
+	/// `wallet` to perform coin selection.
+	pub fn splice_in_and_out_sync<W: Deref>(
+		self, value_added: Amount, outputs: Vec<TxOut>, wallet: W,
+	) -> Result<FundingContribution, ()>
+	where
+		W::Target: CoinSelectionSourceSync,
+	{
+		if value_added == Amount::ZERO && outputs.is_empty() {
+			return Err(());
+		}
+		let FundingTemplate { shared_input, feerate, is_initiator } = self;
+		build_funding_contribution!(
+			value_added,
+			outputs,
+			shared_input,
+			feerate,
+			is_initiator,
+			wallet,
+		)
 	}
 }
 

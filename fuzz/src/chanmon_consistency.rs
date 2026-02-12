@@ -52,7 +52,6 @@ use lightning::ln::channelmanager::{
 	ChainParameters, ChannelManager, ChannelManagerReadArgs, PaymentId, RecentPaymentDetails,
 };
 use lightning::ln::functional_test_utils::*;
-use lightning::ln::funding::SpliceContribution;
 use lightning::ln::inbound_payment::ExpandedKey;
 use lightning::ln::msgs::{
 	BaseMessageHandler, ChannelMessageHandler, CommitmentUpdate, Init, MessageSendEvent,
@@ -1508,26 +1507,6 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(
 						events::Event::PaymentForwarded { .. } if $node == 1 => {},
 						events::Event::ChannelReady { .. } => {},
 						events::Event::HTLCHandlingFailed { .. } => {},
-
-						events::Event::FundingNeeded {
-							channel_id,
-							counterparty_node_id,
-							funding_template,
-							..
-						} => {
-							let wallet =
-								WalletSync::new(&wallets[$node], Arc::clone(&loggers[$node]));
-							let contribution = funding_template.build_sync(&wallet).unwrap();
-							let locktime = None;
-							nodes[$node]
-								.funding_contributed(
-									&channel_id,
-									&counterparty_node_id,
-									contribution,
-									locktime,
-								)
-								.unwrap();
-						},
 						events::Event::FundingTransactionReadyForSigning {
 							channel_id,
 							counterparty_node_id,
@@ -1865,71 +1844,115 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(
 			},
 
 			0xa0 => {
-				let contribution = SpliceContribution::splice_in(Amount::from_sat(10_000));
 				let feerate_sat_per_kw = fee_estimators[0].ret_val.load(atomic::Ordering::Acquire);
 				let feerate = FeeRate::from_sat_per_kwu(feerate_sat_per_kw as u64);
-				if let Err(e) = nodes[0].splice_channel(
+				match nodes[0].splice_channel(
 					&chan_a_id,
 					&nodes[1].get_our_node_id(),
-					contribution,
 					feerate,
 				) {
-					assert!(
-						matches!(e, APIError::APIMisuseError { ref err } if err.contains("awaiting splice funding")),
-						"{:?}",
-						e
-					);
+					Ok(funding_template) => {
+						let wallet = WalletSync::new(&wallets[0], Arc::clone(&loggers[0]));
+						if let Ok(contribution) = funding_template.splice_in_sync(Amount::from_sat(10_000), &wallet) {
+							let _ = nodes[0].funding_contributed(
+								&chan_a_id,
+								&nodes[1].get_our_node_id(),
+								contribution,
+								None,
+							);
+						}
+					},
+					Err(e) => {
+						assert!(
+							matches!(e, APIError::APIMisuseError { ref err } if err.contains("splice")),
+							"{:?}",
+							e
+						);
+					},
 				}
 			},
 			0xa1 => {
-				let contribution = SpliceContribution::splice_in(Amount::from_sat(10_000));
 				let feerate_sat_per_kw = fee_estimators[1].ret_val.load(atomic::Ordering::Acquire);
 				let feerate = FeeRate::from_sat_per_kwu(feerate_sat_per_kw as u64);
-				if let Err(e) = nodes[1].splice_channel(
+				match nodes[1].splice_channel(
 					&chan_a_id,
 					&nodes[0].get_our_node_id(),
-					contribution,
 					feerate,
 				) {
-					assert!(
-						matches!(e, APIError::APIMisuseError { ref err } if err.contains("awaiting splice funding")),
-						"{:?}",
-						e
-					);
+					Ok(funding_template) => {
+						let wallet = WalletSync::new(&wallets[1], Arc::clone(&loggers[1]));
+						if let Ok(contribution) = funding_template.splice_in_sync(Amount::from_sat(10_000), &wallet) {
+							let _ = nodes[1].funding_contributed(
+								&chan_a_id,
+								&nodes[0].get_our_node_id(),
+								contribution,
+								None,
+							);
+						}
+					},
+					Err(e) => {
+						assert!(
+							matches!(e, APIError::APIMisuseError { ref err } if err.contains("splice")),
+							"{:?}",
+							e
+						);
+					},
 				}
 			},
 			0xa2 => {
-				let contribution = SpliceContribution::splice_in(Amount::from_sat(10_000));
 				let feerate_sat_per_kw = fee_estimators[1].ret_val.load(atomic::Ordering::Acquire);
 				let feerate = FeeRate::from_sat_per_kwu(feerate_sat_per_kw as u64);
-				if let Err(e) = nodes[1].splice_channel(
+				match nodes[1].splice_channel(
 					&chan_b_id,
 					&nodes[2].get_our_node_id(),
-					contribution,
 					feerate,
 				) {
-					assert!(
-						matches!(e, APIError::APIMisuseError { ref err } if err.contains("awaiting splice funding")),
-						"{:?}",
-						e
-					);
+					Ok(funding_template) => {
+						let wallet = WalletSync::new(&wallets[1], Arc::clone(&loggers[1]));
+						if let Ok(contribution) = funding_template.splice_in_sync(Amount::from_sat(10_000), &wallet) {
+							let _ = nodes[1].funding_contributed(
+								&chan_b_id,
+								&nodes[2].get_our_node_id(),
+								contribution,
+								None,
+							);
+						}
+					},
+					Err(e) => {
+						assert!(
+							matches!(e, APIError::APIMisuseError { ref err } if err.contains("splice")),
+							"{:?}",
+							e
+						);
+					},
 				}
 			},
 			0xa3 => {
-				let contribution = SpliceContribution::splice_in(Amount::from_sat(10_000));
 				let feerate_sat_per_kw = fee_estimators[2].ret_val.load(atomic::Ordering::Acquire);
 				let feerate = FeeRate::from_sat_per_kwu(feerate_sat_per_kw as u64);
-				if let Err(e) = nodes[2].splice_channel(
+				match nodes[2].splice_channel(
 					&chan_b_id,
 					&nodes[1].get_our_node_id(),
-					contribution,
 					feerate,
 				) {
-					assert!(
-						matches!(e, APIError::APIMisuseError { ref err } if err.contains("awaiting splice funding")),
-						"{:?}",
-						e
-					);
+					Ok(funding_template) => {
+						let wallet = WalletSync::new(&wallets[2], Arc::clone(&loggers[2]));
+						if let Ok(contribution) = funding_template.splice_in_sync(Amount::from_sat(10_000), &wallet) {
+							let _ = nodes[2].funding_contributed(
+								&chan_b_id,
+								&nodes[1].get_our_node_id(),
+								contribution,
+								None,
+							);
+						}
+					},
+					Err(e) => {
+						assert!(
+							matches!(e, APIError::APIMisuseError { ref err } if err.contains("splice")),
+							"{:?}",
+							e
+						);
+					},
 				}
 			},
 
@@ -1944,24 +1967,36 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(
 					.map(|chan| chan.outbound_capacity_msat)
 					.unwrap();
 				if outbound_capacity_msat >= 20_000_000 {
-					let contribution = SpliceContribution::splice_out(vec![TxOut {
+					let outputs = vec![TxOut {
 						value: Amount::from_sat(MAX_STD_OUTPUT_DUST_LIMIT_SATOSHIS),
 						script_pubkey: coinbase_tx.output[0].script_pubkey.clone(),
-					}]);
+					}];
 					let feerate_sat_per_kw =
 						fee_estimators[0].ret_val.load(atomic::Ordering::Acquire);
 					let feerate = FeeRate::from_sat_per_kwu(feerate_sat_per_kw as u64);
-					if let Err(e) = nodes[0].splice_channel(
+					match nodes[0].splice_channel(
 						&chan_a_id,
 						&nodes[1].get_our_node_id(),
-						contribution,
 						feerate,
 					) {
-						assert!(
-							matches!(e, APIError::APIMisuseError { ref err } if err.contains("awaiting splice funding")),
-							"{:?}",
-							e
-						);
+						Ok(funding_template) => {
+							let wallet = WalletSync::new(&wallets[0], Arc::clone(&loggers[0]));
+							if let Ok(contribution) = funding_template.splice_out_sync(outputs, &wallet) {
+								let _ = nodes[0].funding_contributed(
+									&chan_a_id,
+									&nodes[1].get_our_node_id(),
+									contribution,
+									None,
+								);
+							}
+						},
+						Err(e) => {
+							assert!(
+								matches!(e, APIError::APIMisuseError { ref err } if err.contains("splice")),
+								"{:?}",
+								e
+							);
+						},
 					}
 				}
 			},
@@ -1973,24 +2008,36 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(
 					.map(|chan| chan.outbound_capacity_msat)
 					.unwrap();
 				if outbound_capacity_msat >= 20_000_000 {
-					let contribution = SpliceContribution::splice_out(vec![TxOut {
+					let outputs = vec![TxOut {
 						value: Amount::from_sat(MAX_STD_OUTPUT_DUST_LIMIT_SATOSHIS),
 						script_pubkey: coinbase_tx.output[1].script_pubkey.clone(),
-					}]);
+					}];
 					let feerate_sat_per_kw =
 						fee_estimators[1].ret_val.load(atomic::Ordering::Acquire);
 					let feerate = FeeRate::from_sat_per_kwu(feerate_sat_per_kw as u64);
-					if let Err(e) = nodes[1].splice_channel(
+					match nodes[1].splice_channel(
 						&chan_a_id,
 						&nodes[0].get_our_node_id(),
-						contribution,
 						feerate,
 					) {
-						assert!(
-							matches!(e, APIError::APIMisuseError { ref err } if err.contains("awaiting splice funding")),
-							"{:?}",
-							e
-						);
+						Ok(funding_template) => {
+							let wallet = WalletSync::new(&wallets[1], Arc::clone(&loggers[1]));
+							if let Ok(contribution) = funding_template.splice_out_sync(outputs, &wallet) {
+								let _ = nodes[1].funding_contributed(
+									&chan_a_id,
+									&nodes[0].get_our_node_id(),
+									contribution,
+									None,
+								);
+							}
+						},
+						Err(e) => {
+							assert!(
+								matches!(e, APIError::APIMisuseError { ref err } if err.contains("splice")),
+								"{:?}",
+								e
+							);
+						},
 					}
 				}
 			},
@@ -2002,24 +2049,36 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(
 					.map(|chan| chan.outbound_capacity_msat)
 					.unwrap();
 				if outbound_capacity_msat >= 20_000_000 {
-					let contribution = SpliceContribution::splice_out(vec![TxOut {
+					let outputs = vec![TxOut {
 						value: Amount::from_sat(MAX_STD_OUTPUT_DUST_LIMIT_SATOSHIS),
 						script_pubkey: coinbase_tx.output[1].script_pubkey.clone(),
-					}]);
+					}];
 					let feerate_sat_per_kw =
 						fee_estimators[1].ret_val.load(atomic::Ordering::Acquire);
 					let feerate = FeeRate::from_sat_per_kwu(feerate_sat_per_kw as u64);
-					if let Err(e) = nodes[1].splice_channel(
+					match nodes[1].splice_channel(
 						&chan_b_id,
 						&nodes[2].get_our_node_id(),
-						contribution,
 						feerate,
 					) {
-						assert!(
-							matches!(e, APIError::APIMisuseError { ref err } if err.contains("awaiting splice funding")),
-							"{:?}",
-							e
-						);
+						Ok(funding_template) => {
+							let wallet = WalletSync::new(&wallets[1], Arc::clone(&loggers[1]));
+							if let Ok(contribution) = funding_template.splice_out_sync(outputs, &wallet) {
+								let _ = nodes[1].funding_contributed(
+									&chan_b_id,
+									&nodes[2].get_our_node_id(),
+									contribution,
+									None,
+								);
+							}
+						},
+						Err(e) => {
+							assert!(
+								matches!(e, APIError::APIMisuseError { ref err } if err.contains("splice")),
+								"{:?}",
+								e
+							);
+						},
 					}
 				}
 			},
@@ -2031,24 +2090,36 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(
 					.map(|chan| chan.outbound_capacity_msat)
 					.unwrap();
 				if outbound_capacity_msat >= 20_000_000 {
-					let contribution = SpliceContribution::splice_out(vec![TxOut {
+					let outputs = vec![TxOut {
 						value: Amount::from_sat(MAX_STD_OUTPUT_DUST_LIMIT_SATOSHIS),
 						script_pubkey: coinbase_tx.output[2].script_pubkey.clone(),
-					}]);
+					}];
 					let feerate_sat_per_kw =
 						fee_estimators[2].ret_val.load(atomic::Ordering::Acquire);
 					let feerate = FeeRate::from_sat_per_kwu(feerate_sat_per_kw as u64);
-					if let Err(e) = nodes[2].splice_channel(
+					match nodes[2].splice_channel(
 						&chan_b_id,
 						&nodes[1].get_our_node_id(),
-						contribution,
 						feerate,
 					) {
-						assert!(
-							matches!(e, APIError::APIMisuseError { ref err } if err.contains("awaiting splice funding")),
-							"{:?}",
-							e
-						);
+						Ok(funding_template) => {
+							let wallet = WalletSync::new(&wallets[2], Arc::clone(&loggers[2]));
+							if let Ok(contribution) = funding_template.splice_out_sync(outputs, &wallet) {
+								let _ = nodes[2].funding_contributed(
+									&chan_b_id,
+									&nodes[1].get_our_node_id(),
+									contribution,
+									None,
+								);
+							}
+						},
+						Err(e) => {
+							assert!(
+								matches!(e, APIError::APIMisuseError { ref err } if err.contains("splice")),
+								"{:?}",
+								e
+							);
+						},
 					}
 				}
 			},

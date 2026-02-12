@@ -47,9 +47,9 @@ use lightning_0_0_125::util::ser::Writeable as _;
 
 use lightning::chain::channelmonitor::{ANTI_REORG_DELAY, HTLC_FAIL_BACK_BUFFER};
 use lightning::events::{ClosureReason, Event, HTLCHandlingFailureType};
-use lightning::util::wallet_utils::WalletSourceSync;
+use lightning::chain::chaininterface::FEERATE_FLOOR_SATS_PER_KW;
+use lightning::util::wallet_utils::{WalletSourceSync, WalletSync};
 use lightning::ln::functional_test_utils::*;
-use lightning::ln::funding::SpliceContribution;
 use lightning::ln::msgs::BaseMessageHandler as _;
 use lightning::ln::msgs::ChannelMessageHandler as _;
 use lightning::ln::msgs::MessageSendEvent;
@@ -61,7 +61,7 @@ use lightning_types::payment::{PaymentHash, PaymentPreimage, PaymentSecret};
 
 use bitcoin::script::Builder;
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::{opcodes, Amount, TxOut};
+use bitcoin::{opcodes, Amount, FeeRate, TxOut};
 
 use std::sync::Arc;
 
@@ -451,12 +451,29 @@ fn do_test_0_1_htlc_forward_after_splice(fail_htlc: bool) {
 	reconnect_b_c_args.send_announcement_sigs = (true, true);
 	reconnect_nodes(reconnect_b_c_args);
 
-	let contribution = SpliceContribution::splice_out(vec![TxOut {
+	let outputs = vec![TxOut {
 		value: Amount::from_sat(1_000),
 		script_pubkey: nodes[0].wallet_source.get_change_script().unwrap(),
-	}]);
+	}];
+	let channel_id = ChannelId(chan_id_bytes_a);
+	let feerate = FeeRate::from_sat_per_kwu(FEERATE_FLOOR_SATS_PER_KW as u64);
+	let funding_template = nodes[0]
+		.node
+		.splice_channel(&channel_id, &nodes[1].node.get_our_node_id(), feerate)
+		.unwrap();
+	let wallet = WalletSync::new(Arc::clone(&nodes[0].wallet_source), nodes[0].logger);
+	let funding_contribution = funding_template.splice_out_sync(outputs, &wallet).unwrap();
+	nodes[0]
+		.node
+		.funding_contributed(
+			&channel_id,
+			&nodes[1].node.get_our_node_id(),
+			funding_contribution.clone(),
+			None,
+		)
+		.unwrap();
 	let (splice_tx, _) =
-		splice_channel(&nodes[0], &nodes[1], ChannelId(chan_id_bytes_a), contribution);
+		splice_channel(&nodes[0], &nodes[1], channel_id, funding_contribution);
 	for node in nodes.iter() {
 		mine_transaction(node, &splice_tx);
 		connect_blocks(node, ANTI_REORG_DELAY - 1);
