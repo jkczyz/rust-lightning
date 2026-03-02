@@ -6683,7 +6683,7 @@ impl FundingNegotiationContext {
 // Counterparty designates channel data owned by the another channel participant entity.
 #[cfg_attr(test, derive(Debug))]
 pub(super) struct FundedChannel<SP: SignerProvider> {
-	pub funding: FundingScope<ChannelTransactionParameters>,
+	pub(super) funding: FundingScope<ChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	holder_commitment_point: HolderCommitmentPoint,
 
@@ -6889,6 +6889,46 @@ where
 {
 	pub fn context(&self) -> &ChannelContext<SP> {
 		&self.context
+	}
+
+	pub fn get_short_channel_id(&self) -> Option<u64> {
+		self.funding.get_short_channel_id()
+	}
+
+	pub fn get_funding_txo(&self) -> Option<OutPoint> {
+		self.funding.get_funding_txo()
+	}
+
+	pub fn get_channel_type(&self) -> &ChannelTypeFeatures {
+		self.funding.get_channel_type()
+	}
+
+	pub fn get_value_satoshis(&self) -> u64 {
+		self.funding.get_value_satoshis()
+	}
+
+	pub fn get_value_to_self_msat(&self) -> u64 {
+		self.funding.get_value_to_self_msat()
+	}
+
+	pub fn is_outbound(&self) -> bool {
+		self.funding.is_outbound()
+	}
+
+	pub fn get_funding_tx_confirmation_height(&self) -> Option<u32> {
+		self.funding.get_funding_tx_confirmation_height()
+	}
+
+	pub fn get_funding_tx_confirmations(&self, height: u32) -> u32 {
+		self.funding.get_funding_tx_confirmations(height)
+	}
+
+	pub fn make_funding_redeemscript(&self) -> ScriptBuf {
+		self.funding.channel_transaction_parameters.make_funding_redeemscript()
+	}
+
+	pub fn minimum_depth(&self) -> Option<u32> {
+		self.context.minimum_depth(&self.funding)
 	}
 
 	fn is_v2_established(&self) -> bool {
@@ -13496,6 +13536,14 @@ pub(super) struct OutboundV1Channel<SP: SignerProvider> {
 }
 
 impl<SP: SignerProvider> OutboundV1Channel<SP> {
+	pub fn get_value_satoshis(&self) -> u64 {
+		self.funding.get_value_satoshis()
+	}
+
+	pub fn get_funding_redeemscript(&self) -> ScriptBuf {
+		self.funding.get_funding_redeemscript()
+	}
+
 	pub fn abandon_unfunded_chan(&mut self, closure_reason: ClosureReason) -> ShutdownResult {
 		self.context.force_shutdown(&self.funding, closure_reason)
 	}
