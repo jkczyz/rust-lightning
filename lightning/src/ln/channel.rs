@@ -1551,7 +1551,7 @@ where
 	pub fn get_funding_txo(&self) -> Option<OutPoint> {
 		match &self.phase {
 			ChannelPhase::Undefined => unreachable!(),
-			ChannelPhase::Funded(chan) => chan.funding.get_funding_txo(),
+			ChannelPhase::Funded(chan) => Some(chan.funding.funding_txo()),
 			ChannelPhase::UnfundedOutboundV1(chan) => chan.funding.get_funding_txo(),
 			ChannelPhase::PendingV1(chan) => chan.funding.get_funding_txo(),
 			ChannelPhase::UnfundedInboundV1(chan) => chan.funding.get_funding_txo(),
@@ -2896,20 +2896,6 @@ impl<P: ChannelTransactionParametersAccess> FundingScope<P> {
 		self.channel_transaction_parameters.funding_outpoint()
 	}
 
-	/// Gets the funding output for this channel, if available.
-	///
-	/// When a channel is spliced, this continues to refer to the original funding output (which
-	/// was spent by the splice transaction) until the splice transaction reaches sufficient
-	/// confirmations to be locked (and we exchange `splice_locked` messages with our peer).
-	pub fn get_funding_output(&self) -> Option<TxOut> {
-		self.channel_transaction_parameters.make_funding_redeemscript_opt().map(|redeem_script| {
-			TxOut {
-				value: Amount::from_sat(self.get_value_satoshis()),
-				script_pubkey: redeem_script.to_p2wsh(),
-			}
-		})
-	}
-
 	fn get_holder_selected_contest_delay(&self) -> u16 {
 		self.channel_transaction_parameters.holder_selected_contest_delay()
 	}
@@ -3109,6 +3095,24 @@ impl FundingScope<ChannelTransactionParameters> {
 		self.channel_transaction_parameters.funding_outpoint.txid
 	}
 
+	fn funding_txo(&self) -> OutPoint {
+		self.channel_transaction_parameters.funding_outpoint.into()
+	}
+
+	fn funding_output(&self) -> TxOut {
+		TxOut {
+			value: Amount::from_sat(self.get_value_satoshis()),
+			script_pubkey: self
+				.channel_transaction_parameters
+				.make_funding_redeemscript()
+				.to_p2wsh(),
+		}
+	}
+
+	fn counterparty_selected_contest_delay(&self) -> u16 {
+		self.channel_transaction_parameters.counterparty_parameters.selected_contest_delay
+	}
+
 	/// Converts this `FundingScope` with complete parameters back into one with partial
 	/// parameters. Used when reverting a channel from funded to unfunded state.
 	fn into_partial(self) -> FundingScope<PartialChannelTransactionParameters> {
@@ -3145,7 +3149,7 @@ impl FundingScope<ChannelTransactionParameters> {
 
 	/// Returns a `SharedOwnedInput` for using this `FundingScope` as the input to a new splice.
 	fn to_splice_funding_input(&self) -> SharedOwnedInput {
-		let funding_txo = self.get_funding_txo().expect("funding_txo should be set");
+		let funding_txo = self.funding_txo();
 		let input = TxIn {
 			previous_output: funding_txo.into_bitcoin_outpoint(),
 			script_sig: ScriptBuf::new(),
@@ -5296,7 +5300,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 			let htlc_tx = chan_utils::build_htlc_transaction(
 				&commitment_txid,
 				commitment_data.tx.negotiated_feerate_per_kw(),
-				funding.get_counterparty_selected_contest_delay().unwrap(),
+				funding.counterparty_selected_contest_delay(),
 				&htlc,
 				funding.get_channel_type(),
 				&holder_keys.broadcaster_delayed_payment_key,
@@ -6901,8 +6905,8 @@ where
 		self.funding.get_short_channel_id()
 	}
 
-	pub fn get_funding_txo(&self) -> Option<OutPoint> {
-		self.funding.get_funding_txo()
+	pub fn get_funding_txo(&self) -> OutPoint {
+		self.funding.funding_txo()
 	}
 
 	pub fn unbroadcasted_funding(&self) -> Option<Transaction> {
@@ -8122,7 +8126,7 @@ where
 		log_info!(
 			logger,
 			"Received splice initial commitment_signed from peer with funding txid {}",
-			pending_splice_funding.get_funding_txo().unwrap().txid
+			pending_splice_funding.funding_txo().txid
 		);
 
 		self.context.latest_monitor_update_id += 1;
@@ -9114,8 +9118,7 @@ where
 			{
 				funding.funding_transaction = Some(funding_tx);
 
-				let funding_txo =
-					funding.get_funding_txo().expect("funding outpoint should be set");
+				let funding_txo = funding.funding_txo();
 				let channel_type = funding.get_channel_type().clone();
 				let funding_redeem_script = funding.get_funding_redeemscript();
 
@@ -10745,7 +10748,7 @@ where
 			counterparty_node_id: self.context.counterparty_node_id,
 			unbroadcasted_funding_tx: self.context.unbroadcasted_funding(&self.funding),
 			is_manual_broadcast: self.context.is_manual_broadcast,
-			channel_funding_txo: self.funding.get_funding_txo(),
+			channel_funding_txo: Some(self.funding.funding_txo()),
 			last_local_balance_msat: self.funding.value_to_self_msat,
 			splice_funding_failed: None,
 		}
@@ -11351,9 +11354,7 @@ where
 						.take()
 						.map(|tx| FundingInfo::Tx { transaction: tx })
 						.unwrap_or_else(|| FundingInfo::OutPoint {
-							outpoint: funding
-								.get_funding_txo()
-								.expect("Negotiated splices must have a known funding outpoint"),
+							outpoint: funding.funding_txo(),
 						})
 				})
 				.collect::<Vec<_>>()
@@ -11364,10 +11365,7 @@ where
 		self.context.announcement_sigs = None;
 		self.context.announcement_sigs_state = AnnouncementSigsState::NotSent;
 
-		let funding_txo = self
-			.funding
-			.get_funding_txo()
-			.expect("Splice FundingScope should always have a funding_txo");
+		let funding_txo = self.funding.funding_txo();
 
 		self.context.latest_monitor_update_id += 1;
 		let monitor_update = ChannelMonitorUpdate {
@@ -12071,9 +12069,8 @@ where
 			});
 		}
 
-		let funding_txo = self.funding.get_funding_txo().expect("funding_txo should be set");
-		let previous_utxo =
-			self.funding.get_funding_output().expect("funding_output should be set");
+		let funding_txo = self.funding.funding_txo();
+		let previous_utxo = self.funding.funding_output();
 		let shared_input = Input {
 			outpoint: funding_txo.into_bitcoin_outpoint(),
 			previous_utxo,
@@ -13058,7 +13055,7 @@ where
 					channel_id: self.context.channel_id,
 					signature,
 					htlc_signatures,
-					funding_txid: funding.get_funding_txo().map(|funding_txo| funding_txo.txid),
+					funding_txid: Some(funding.funding_txo().txid),
 					#[cfg(taproot)]
 					partial_signature_with_nonce: None,
 				})
@@ -16978,7 +16975,7 @@ mod tests {
 					let ref htlc = commitment_tx.nondust_htlcs()[$htlc_idx];
 					let keys = commitment_tx.trust().keys();
 					let mut htlc_tx = chan_utils::build_htlc_transaction(&unsigned_tx.txid, $chan.context.feerate_per_kw,
-						$chan.funding.get_counterparty_selected_contest_delay().unwrap(),
+						$chan.funding.counterparty_selected_contest_delay(),
 						&htlc, $channel_type_features, &keys.broadcaster_delayed_payment_key, &keys.revocation_key);
 					let htlc_redeemscript = chan_utils::get_htlc_redeemscript(&htlc, $channel_type_features, &keys);
 					let htlc_sighash = Message::from_digest(sighash::SighashCache::new(&htlc_tx).p2wsh_signature_hash(0, &htlc_redeemscript, htlc.to_bitcoin_amount(), htlc_sighashtype).unwrap().as_raw_hash().to_byte_array());

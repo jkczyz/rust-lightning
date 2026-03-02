@@ -3237,7 +3237,7 @@ macro_rules! emit_funding_tx_broadcast_safe_event {
 macro_rules! emit_channel_pending_event {
 	($locked_events: expr, $channel: expr) => {
 		if $channel.context.should_emit_channel_pending_event() {
-			let funding_txo = $channel.get_funding_txo().unwrap();
+			let funding_txo = $channel.get_funding_txo();
 			let funding_redeem_script = Some($channel.make_funding_redeemscript());
 			$locked_events.push_back((
 				events::Event::ChannelPending {
@@ -3265,9 +3265,7 @@ macro_rules! emit_initial_channel_ready_event {
 					channel_id: $channel.context.channel_id(),
 					user_channel_id: $channel.context.get_user_id(),
 					counterparty_node_id: $channel.context.get_counterparty_node_id(),
-					funding_txo: $channel
-						.get_funding_txo()
-						.map(|outpoint| outpoint.into_bitcoin_outpoint()),
+					funding_txo: Some($channel.get_funding_txo().into_bitcoin_outpoint()),
 					channel_type: $channel.get_channel_type().clone(),
 				},
 				None,
@@ -3910,7 +3908,7 @@ impl<
 					}
 
 					if let Some(chan) = chan_entry.get_mut().as_funded_mut() {
-						let funding_txo_opt = chan.get_funding_txo();
+						let funding_txo = chan.get_funding_txo();
 						let their_features = &peer_state.latest_features;
 						let (shutdown_msg, mut monitor_update_opt, htlcs, splice_funding_failed) =
 							chan.get_shutdown(
@@ -3967,7 +3965,7 @@ impl<
 								&mut peer_state.pending_msg_events,
 								peer_state.is_connected,
 								chan,
-								funding_txo_opt.unwrap(),
+								funding_txo,
 								monitor_update,
 							) {
 								mem::drop(peer_state_lock);
@@ -5316,7 +5314,7 @@ impl<
 								err: "Peer for first hop currently disconnected".to_owned(),
 							});
 						}
-						let funding_txo = chan.get_funding_txo().unwrap();
+						let funding_txo = chan.get_funding_txo();
 						let htlc_source = HTLCSource::OutboundRoute {
 							path: path.clone(),
 							session_priv: session_priv.clone(),
@@ -6770,7 +6768,7 @@ impl<
 												&mut peer_state.pending_msg_events,
 												peer_state.is_connected,
 												funded_chan,
-												funding_txo.unwrap(),
+												funding_txo,
 												monitor_update,
 											) {
 											monitor_update_result = Some(Ok(post_update_data));
@@ -7158,7 +7156,7 @@ impl<
 					(
 						chan.context.get_counterparty_node_id(),
 						chan.context.channel_id(),
-						chan.get_funding_txo().unwrap(),
+						chan.get_funding_txo(),
 						chan.context.get_user_id(),
 						chan.context.config().accept_underpaying_htlcs,
 						chan.context.should_announce(),
@@ -10510,7 +10508,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 					prev_htlc_id,
 					prev_counterparty_node_id: counterparty_node_id,
 					prev_channel_id: channel.context.channel_id(),
-					prev_funding_outpoint: channel.get_funding_txo().unwrap(),
+					prev_funding_outpoint: channel.get_funding_txo(),
 					prev_user_channel_id: channel.context.get_user_id(),
 				}
 			}).collect();
@@ -10595,15 +10593,8 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 			if channel.context.is_manual_broadcast() {
 				log_info!(logger, "Not broadcasting funding transaction with txid {} as it is manually managed", tx.compute_txid());
 				let mut pending_events = self.pending_events.lock().unwrap();
-				match channel.get_funding_txo() {
-					Some(funding_txo) => {
-						emit_funding_tx_broadcast_safe_event!(pending_events, channel, funding_txo.into_bitcoin_outpoint())
-					},
-					None => {
-						debug_assert!(false, "Channel resumed without a funding txo, this should never happen!");
-						return (htlc_forwards, decode_update_add_htlcs);
-					}
-				};
+				let funding_txo = channel.get_funding_txo();
+				emit_funding_tx_broadcast_safe_event!(pending_events, channel, funding_txo.into_bitcoin_outpoint());
 			} else {
 				log_info!(logger, "Broadcasting funding transaction with txid {}", tx.compute_txid());
 				self.tx_broadcaster.broadcast_transactions(&[(
@@ -11932,7 +11923,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 							);
 						}
 
-						let funding_txo_opt = chan.get_funding_txo();
+						let funding_txo = chan.get_funding_txo();
 						let res = chan.shutdown(
 							&self.logger,
 							&self.signer_provider,
@@ -11984,7 +11975,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 								&mut peer_state.pending_msg_events,
 								peer_state.is_connected,
 								chan,
-								funding_txo_opt.unwrap(),
+								funding_txo,
 								monitor_update,
 							) {
 								mem::drop(peer_state_lock);
@@ -12195,8 +12186,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 						// `ReleaseRAAChannelMonitorUpdate` action to the event generated when the
 						// outbound HTLC is claimed. This is guaranteed to all complete before we
 						// process the RAA as messages are processed from single peers serially.
-						funding_txo =
-							chan.get_funding_txo().expect("We won't accept a fulfill until funded");
+						funding_txo = chan.get_funding_txo();
 						next_user_channel_id = chan.context.get_user_id();
 						res
 					} else {
@@ -12493,15 +12483,13 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 				hash_map::Entry::Occupied(mut chan_entry) => {
 					if let Some(chan) = chan_entry.get_mut().as_funded_mut() {
 						let logger = WithChannelContext::from(&self.logger, &chan.context, None);
-						let funding_txo_opt = chan.get_funding_txo();
+						let funding_txo = chan.get_funding_txo();
 						let mon_update_blocked = self.raa_monitor_updates_held(
 							&peer_state.actions_blocking_raa_monitor_updates, msg.channel_id,
 							*counterparty_node_id);
 						let (htlcs_to_fail, static_invoices, monitor_update_opt) = try_channel_entry!(self, peer_state,
 							chan.revoke_and_ack(&msg, &self.fee_estimator, &&logger, mon_update_blocked), chan_entry);
 						if let Some(monitor_update) = monitor_update_opt {
-							let funding_txo = funding_txo_opt
-								.expect("Funding outpoint must have been set for RAA handling to succeed");
 							if let Some(data) = self.handle_new_monitor_update(
 								&mut peer_state.in_flight_monitor_updates,
 								&mut peer_state.monitor_update_blocked_actions,
@@ -13197,7 +13185,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 							&mut peer_state.pending_msg_events,
 							peer_state.is_connected,
 							chan,
-							chan.get_funding_txo().unwrap(),
+							chan.get_funding_txo(),
 							monitor_update,
 						)
 					})
@@ -18492,7 +18480,7 @@ impl<
 							reason: ClosureReason::OutdatedChannelManager,
 							counterparty_node_id: Some(channel.context.get_counterparty_node_id()),
 							channel_capacity_sats: Some(channel.get_value_satoshis()),
-							channel_funding_txo: channel.get_funding_txo(),
+							channel_funding_txo: Some(channel.get_funding_txo()),
 							last_local_balance_msat: Some(channel.get_value_to_self_msat()),
 						},
 						None,
@@ -18573,7 +18561,7 @@ impl<
 						reason: ClosureReason::DisconnectedPeer,
 						counterparty_node_id: Some(channel.context.get_counterparty_node_id()),
 						channel_capacity_sats: Some(channel.get_value_satoshis()),
-						channel_funding_txo: channel.get_funding_txo(),
+						channel_funding_txo: Some(channel.get_funding_txo()),
 						last_local_balance_msat: Some(channel.get_value_to_self_msat()),
 					},
 					None,
