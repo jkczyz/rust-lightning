@@ -1073,29 +1073,6 @@ pub(crate) trait ChannelTransactionParametersAccess {
 	}
 }
 
-/// Extension of [`ChannelTransactionParametersAccess`] that provides conversion to
-/// [`ChannelTransactionParameters`].
-///
-/// Separated from the base trait so that generic code bounded by
-/// `ChannelTransactionParametersAccess` alone cannot accidentally reconstruct the complete
-/// parameters, keeping accessor-only and conversion concerns distinct.
-pub(crate) trait ChannelTransactionParametersConvert:
-	ChannelTransactionParametersAccess
-{
-	/// Returns a reference to `self` as `ChannelTransactionParameters`, if the concrete type is
-	/// `ChannelTransactionParameters`. Returns `None` for partial parameters.
-	///
-	/// This allows callers to borrow complete parameters without cloning on the hot path.
-	fn as_complete(&self) -> Option<&ChannelTransactionParameters>;
-
-	/// Converts to a `ChannelTransactionParameters` by cloning. Returns `None` if late-bound
-	/// fields are not populated.
-	///
-	/// For the complete type, this clones `self`. For the partial type, this delegates to
-	/// `to_complete()`. Prefer `as_complete()` when a reference suffices.
-	fn to_complete(&self) -> Option<ChannelTransactionParameters>;
-}
-
 /// Per-channel data used to build transactions in conjunction with the per-commitment data
 /// (CommitmentTransaction). The fields are organized by holder/counterparty.
 ///
@@ -1202,15 +1179,6 @@ impl ChannelTransactionParametersAccess for PartialChannelTransactionParameters 
 	}
 }
 
-impl ChannelTransactionParametersConvert for PartialChannelTransactionParameters {
-	fn as_complete(&self) -> Option<&ChannelTransactionParameters> {
-		None
-	}
-	fn to_complete(&self) -> Option<ChannelTransactionParameters> {
-		self.to_complete()
-	}
-}
-
 impl ChannelTransactionParametersAccess for ChannelTransactionParameters {
 	fn holder_pubkeys(&self) -> &ChannelPublicKeys {
 		&self.holder_pubkeys
@@ -1235,15 +1203,6 @@ impl ChannelTransactionParametersAccess for ChannelTransactionParameters {
 	}
 	fn counterparty_parameters(&self) -> Option<&CounterpartyChannelTransactionParameters> {
 		Some(&self.counterparty_parameters)
-	}
-}
-
-impl ChannelTransactionParametersConvert for ChannelTransactionParameters {
-	fn as_complete(&self) -> Option<&ChannelTransactionParameters> {
-		Some(self)
-	}
-	fn to_complete(&self) -> Option<ChannelTransactionParameters> {
-		Some(self.clone())
 	}
 }
 

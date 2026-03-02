@@ -41,8 +41,8 @@ use crate::ln::chan_utils;
 use crate::ln::chan_utils::{
 	get_commitment_transaction_number_obscure_factor, max_htlcs, second_stage_tx_fees_sat,
 	selected_commitment_sat_per_1000_weight, ChannelPublicKeys, ChannelTransactionParameters,
-	ChannelTransactionParametersAccess, ChannelTransactionParametersConvert, ClosingTransaction,
-	CommitmentTransaction, CounterpartyChannelTransactionParameters, CounterpartyCommitmentSecrets,
+	ChannelTransactionParametersAccess, ClosingTransaction, CommitmentTransaction,
+	CounterpartyChannelTransactionParameters, CounterpartyCommitmentSecrets,
 	HTLCOutputInCommitment, HolderCommitmentTransaction, PartialChannelTransactionParameters,
 	EMPTY_SCRIPT_SIG_WEIGHT, FUNDING_TRANSACTION_WITNESS_WEIGHT,
 };
@@ -2411,11 +2411,24 @@ where
 			.and_then(|pending_splice| pending_splice.funding_negotiation.as_ref())
 			.and_then(|funding_negotiation| funding_negotiation.as_funding())
 		{
-			context.get_initial_commitment_signed_v2(splice_funding, &&logger)
+			context.get_initial_commitment_signed_v2(
+				splice_funding,
+				&splice_funding.channel_transaction_parameters,
+				&&logger,
+			)
 		} else {
 			match &funding {
-				FundingRef::Partial(f) => context.get_initial_commitment_signed_v2(*f, &&logger),
-				FundingRef::Complete(f) => context.get_initial_commitment_signed_v2(*f, &&logger),
+				FundingRef::Partial(f) => {
+					let channel_parameters = f.channel_transaction_parameters.to_complete().expect(
+						"channel_transaction_parameters must be complete after tx construction",
+					);
+					context.get_initial_commitment_signed_v2(*f, &channel_parameters, &&logger)
+				},
+				FundingRef::Complete(f) => context.get_initial_commitment_signed_v2(
+					*f,
+					&f.channel_transaction_parameters,
+					&&logger,
+				),
 			}
 		};
 
@@ -6261,10 +6274,11 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 	}
 
 	fn get_initial_counterparty_commitment_signatures<
-		P: ChannelTransactionParametersConvert,
+		P: ChannelTransactionParametersAccess,
 		L: Logger,
 	>(
-		&self, funding: &FundingScope<P>, logger: &L,
+		&self, funding: &FundingScope<P>, channel_parameters: &ChannelTransactionParameters,
+		logger: &L,
 	) -> Option<(Signature, Vec<Signature>)> {
 		let mut commitment_number = self.counterparty_next_commitment_transaction_number;
 		let mut commitment_point = self.counterparty_next_commitment_point.unwrap();
@@ -6275,18 +6289,6 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 			commitment_point = self.counterparty_current_commitment_point.unwrap();
 		}
 
-		let owned_params;
-		let channel_parameters: &ChannelTransactionParameters =
-			match funding.channel_transaction_parameters.as_complete() {
-				Some(params) => params,
-				None => {
-					owned_params = funding
-						.channel_transaction_parameters
-						.to_complete()
-						.expect("channel_transaction_parameters must be populated");
-					&owned_params
-				},
-			};
 		let commitment_data = self.build_commitment_transaction(
 			funding,
 			channel_parameters,
@@ -6314,10 +6316,15 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 		}
 	}
 
-	fn get_initial_commitment_signed_v2<P: ChannelTransactionParametersConvert, L: Logger>(
-		&mut self, funding: &FundingScope<P>, logger: &L,
+	fn get_initial_commitment_signed_v2<P: ChannelTransactionParametersAccess, L: Logger>(
+		&mut self, funding: &FundingScope<P>, channel_parameters: &ChannelTransactionParameters,
+		logger: &L,
 	) -> Option<msgs::CommitmentSigned> {
-		let signatures = self.get_initial_counterparty_commitment_signatures(funding, logger);
+		let signatures = self.get_initial_counterparty_commitment_signatures(
+			funding,
+			channel_parameters,
+			logger,
+		);
 		if let Some((signature, htlc_signatures)) = signatures {
 			log_info!(logger, "Generated commitment_signed for peer",);
 			if matches!(self.channel_state, ChannelState::FundingNegotiated(_)) {
@@ -9522,7 +9529,9 @@ where
 					funding_negotiation.as_funding()
 				})
 				.unwrap_or(&self.funding);
-			self.context.get_initial_commitment_signed_v2(funding, logger)
+			self.context.get_initial_commitment_signed_v2(
+				funding, &funding.channel_transaction_parameters, logger,
+			)
 		} else {
 			None
 		};
@@ -10000,7 +10009,9 @@ where
 
 			commitment_update = self
 				.context
-				.get_initial_commitment_signed_v2(&funding, logger)
+				.get_initial_commitment_signed_v2(
+					&funding, &funding.channel_transaction_parameters, logger,
+				)
 				.map(|commitment_signed|
 					msgs::CommitmentUpdate {
 						commitment_signed: vec![commitment_signed],
