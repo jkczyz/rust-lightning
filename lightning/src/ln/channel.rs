@@ -2431,17 +2431,9 @@ where
 			.and_then(|pending_splice| pending_splice.funding_negotiation.as_ref())
 			.and_then(|funding_negotiation| funding_negotiation.as_funding())
 		{
-			context.get_initial_commitment_signed_v2(
-				splice_funding,
-				&splice_funding.channel_transaction_parameters,
-				&&logger,
-			)
+			context.get_initial_commitment_signed_v2(splice_funding, &&logger)
 		} else {
-			context.get_initial_commitment_signed_v2(
-				funding,
-				&funding.channel_transaction_parameters,
-				&&logger,
-			)
+			context.get_initial_commitment_signed_v2(funding, &&logger)
 		};
 
 		// For zero conf channels, we don't expect the funding transaction to be ready for broadcast
@@ -5250,7 +5242,6 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 
 		let commitment_data = self.build_commitment_transaction(
 			funding,
-			&funding.channel_transaction_parameters,
 			transaction_number,
 			&commitment_point,
 			true,
@@ -5596,7 +5587,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 	/// which peer generated this transaction and "to whom" this transaction flows.
 	#[inline]
 	#[rustfmt::skip]
-	fn build_commitment_transaction<P: ChannelTransactionParametersAccess, L: Logger>(&self, funding: &FundingScope<P>, channel_parameters: &ChannelTransactionParameters, commitment_number: u64, per_commitment_point: &PublicKey, local: bool, generated_by_local: bool, logger: &L) -> CommitmentData<'_> {
+	fn build_commitment_transaction<L: Logger>(&self, funding: &FundingScope<ChannelTransactionParameters>, commitment_number: u64, per_commitment_point: &PublicKey, local: bool, generated_by_local: bool, logger: &L) -> CommitmentData<'_> {
 		let broadcaster_dust_limit_sat = if local { self.holder_dust_limit_satoshis } else { self.counterparty_dust_limit_satoshis };
 		let feerate_per_kw = self.get_commitment_feerate(funding, generated_by_local);
 
@@ -5671,7 +5662,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 			local,
 			commitment_number,
 			per_commitment_point,
-			channel_parameters,
+			&funding.channel_transaction_parameters,
 			&self.secp_ctx,
 			value_to_self_msat,
 			htlcs_included.iter().map(|(htlc, _source)| htlc).cloned().collect(),
@@ -6107,7 +6098,6 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 		let funding_script = funding.get_funding_redeemscript();
 
 		let commitment_data = self.build_commitment_transaction(funding,
-			&funding.channel_transaction_parameters,
 			holder_commitment_point.next_transaction_number(), &holder_commitment_point.next_point(),
 			true, false, logger);
 		let initial_commitment_tx = commitment_data.tx;
@@ -6122,7 +6112,6 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 		secp_check!(self.secp_ctx.verify_ecdsa(&sighash, &counterparty_signature, funding.counterparty_funding_pubkey()), format!("Invalid {} signature from peer", received_msg));
 
 		let commitment_data = self.build_commitment_transaction(funding,
-			&funding.channel_transaction_parameters,
 			self.counterparty_next_commitment_transaction_number,
 			&self.counterparty_next_commitment_point.unwrap(), false, false, logger);
 		let counterparty_initial_commitment_tx = commitment_data.tx;
@@ -6297,12 +6286,8 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 		}
 	}
 
-	fn get_initial_counterparty_commitment_signatures<
-		P: ChannelTransactionParametersAccess,
-		L: Logger,
-	>(
-		&self, funding: &FundingScope<P>, channel_parameters: &ChannelTransactionParameters,
-		logger: &L,
+	fn get_initial_counterparty_commitment_signatures<L: Logger>(
+		&self, funding: &FundingScope<ChannelTransactionParameters>, logger: &L,
 	) -> Option<(Signature, Vec<Signature>)> {
 		let mut commitment_number = self.counterparty_next_commitment_transaction_number;
 		let mut commitment_point = self.counterparty_next_commitment_point.unwrap();
@@ -6315,7 +6300,6 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 
 		let commitment_data = self.build_commitment_transaction(
 			funding,
-			channel_parameters,
 			commitment_number,
 			&commitment_point,
 			false,
@@ -6327,7 +6311,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 			// TODO (taproot|arik): move match into calling method for Taproot
 			ChannelSignerType::Ecdsa(ref ecdsa) => ecdsa
 				.sign_counterparty_commitment(
-					channel_parameters,
+					&funding.channel_transaction_parameters,
 					&counterparty_initial_commitment_tx,
 					Vec::new(),
 					Vec::new(),
@@ -6340,15 +6324,10 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 		}
 	}
 
-	fn get_initial_commitment_signed_v2<P: ChannelTransactionParametersAccess, L: Logger>(
-		&mut self, funding: &FundingScope<P>, channel_parameters: &ChannelTransactionParameters,
-		logger: &L,
+	fn get_initial_commitment_signed_v2<L: Logger>(
+		&mut self, funding: &FundingScope<ChannelTransactionParameters>, logger: &L,
 	) -> Option<msgs::CommitmentSigned> {
-		let signatures = self.get_initial_counterparty_commitment_signatures(
-			funding,
-			channel_parameters,
-			logger,
-		);
+		let signatures = self.get_initial_counterparty_commitment_signatures(funding, logger);
 		if let Some((signature, htlc_signatures)) = signatures {
 			log_info!(logger, "Generated commitment_signed for peer",);
 			if matches!(self.channel_state, ChannelState::FundingNegotiated(_)) {
@@ -7991,7 +7970,6 @@ where
 			.context
 			.build_commitment_transaction(
 				pending_splice_funding,
-				&pending_splice_funding.channel_transaction_parameters,
 				self.context.counterparty_next_commitment_transaction_number + 1,
 				&self.context.counterparty_current_commitment_point.unwrap(),
 				false,
@@ -9527,7 +9505,6 @@ where
 			&& self.pending_splice.is_none()
 		{
 			let commitment_data = self.context.build_commitment_transaction(&self.funding,
-				&self.funding.channel_transaction_parameters,
 				// The previous transaction number (i.e., when adding 1) is used because this field
 				// is advanced when handling funding_created, but the point is not advanced until
 				// handling channel_ready.
@@ -9553,9 +9530,7 @@ where
 					funding_negotiation.as_funding()
 				})
 				.unwrap_or(&self.funding);
-			self.context.get_initial_commitment_signed_v2(
-				funding, &funding.channel_transaction_parameters, logger,
-			)
+			self.context.get_initial_commitment_signed_v2(funding, logger)
 		} else {
 			None
 		};
@@ -10033,9 +10008,7 @@ where
 
 			commitment_update = self
 				.context
-				.get_initial_commitment_signed_v2(
-					&funding, &funding.channel_transaction_parameters, logger,
-				)
+				.get_initial_commitment_signed_v2(&funding, logger)
 				.map(|commitment_signed|
 					msgs::CommitmentUpdate {
 						commitment_signed: vec![commitment_signed],
@@ -12908,7 +12881,7 @@ where
 		&self, funding: &FundingScope<ChannelTransactionParameters>, logger: &L,
 	) -> (Vec<(HTLCOutputInCommitment, Option<&HTLCSource>)>, CommitmentTransaction) {
 		let commitment_data = self.context.build_commitment_transaction(
-			funding, &funding.channel_transaction_parameters,
+			funding,
 			self.context.counterparty_next_commitment_transaction_number,
 			&self.context.counterparty_next_commitment_point.unwrap(), false, true, logger,
 		);
@@ -12937,7 +12910,7 @@ where
 		self.build_commitment_no_state_update(funding, logger);
 
 		let commitment_data = self.context.build_commitment_transaction(
-			funding, &funding.channel_transaction_parameters,
+			funding,
 			self.context.counterparty_next_commitment_transaction_number,
 			&self.context.counterparty_next_commitment_point.unwrap(), false, true, logger,
 		);
@@ -13719,7 +13692,7 @@ impl<SP: SignerProvider> PendingV1Channel<SP> {
 	#[rustfmt::skip]
 	fn get_funding_created_msg<L: Logger>(&mut self, logger: &L) -> Option<msgs::FundingCreated> {
 		let commitment_data = self.context.build_commitment_transaction(&self.funding,
-			&self.funding.channel_transaction_parameters, self.context.counterparty_next_commitment_transaction_number,
+			self.context.counterparty_next_commitment_transaction_number,
 			&self.context.counterparty_next_commitment_point.unwrap(), false, false, logger);
 		let counterparty_initial_commitment_tx = commitment_data.tx;
 		let signature = match &self.context.holder_signer {
@@ -16818,7 +16791,6 @@ mod tests {
 				$( { $htlc_idx: expr, $counterparty_htlc_sig_hex: expr, $htlc_sig_hex: expr, $htlc_tx_hex: expr, $preimage: expr } ), *
 			} ) => { {
 				let commitment_data = $chan.context.build_commitment_transaction(&$chan.funding,
-					&$chan.funding.channel_transaction_parameters,
 					0xffffffffffff - 42, &$per_commitment_point, true, false, &$logger);
 				let commitment_tx = commitment_data.tx;
 				let trusted_tx = commitment_tx.trust();
