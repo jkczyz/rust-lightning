@@ -2747,7 +2747,7 @@ impl UnfundedChannelContext {
 /// during channel establishment and may be replaced during channel splicing or if the attempted
 /// funding transaction is replaced using tx_init_rbf.
 #[derive(Debug)]
-pub(super) struct FundingScope<P: ChannelTransactionParametersAccess> {
+struct FundingScope<P: ChannelTransactionParametersAccess> {
 	value_to_self_msat: u64, // Excluding all pending_htlcs, fees, and anchor outputs
 
 	/// minimum channel reserve for self to maintain - set by them.
@@ -4419,7 +4419,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 		self.temporary_channel_id
 	}
 
-	pub(super) fn minimum_depth<P: ChannelTransactionParametersAccess>(
+	fn minimum_depth<P: ChannelTransactionParametersAccess>(
 		&self, funding: &FundingScope<P>,
 	) -> Option<u32> {
 		funding.minimum_depth_override.or(self.minimum_depth)
@@ -4464,7 +4464,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 	/// Performs checks against necessary constraints after receiving either an `accept_channel` or
 	/// `accept_channel2` message.
 	#[rustfmt::skip]
-	pub fn do_accept_channel_checks(
+	fn do_accept_channel_checks(
 		&mut self, funding: &mut FundingScope<PartialChannelTransactionParameters>, default_limits: &ChannelHandshakeLimits,
 		their_features: &InitFeatures, common_fields: &msgs::CommonAcceptChannelFields,
 		channel_reserve_satoshis: u64,
@@ -4605,7 +4605,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 	}
 
 	/// Allowed in any state (including after shutdown), but will return none before TheirInitSent
-	pub fn get_holder_htlc_maximum_msat<P: ChannelTransactionParametersAccess>(
+	fn get_holder_htlc_maximum_msat<P: ChannelTransactionParametersAccess>(
 		&self, funding: &FundingScope<P>,
 	) -> Option<u64> {
 		funding.get_htlc_maximum_msat(self.holder_max_htlc_value_in_flight_msat)
@@ -4617,7 +4617,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 	}
 
 	/// Allowed in any state (including after shutdown), but will return none before TheirInitSent
-	pub fn get_counterparty_htlc_maximum_msat<P: ChannelTransactionParametersAccess>(
+	fn get_counterparty_htlc_maximum_msat<P: ChannelTransactionParametersAccess>(
 		&self, funding: &FundingScope<P>,
 	) -> Option<u64> {
 		funding.get_htlc_maximum_msat(self.counterparty_max_htlc_value_in_flight_msat)
@@ -5772,7 +5772,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 
 	/// Returns information on all pending inbound HTLCs.
 	#[rustfmt::skip]
-	pub fn get_pending_inbound_htlc_details<P: ChannelTransactionParametersAccess>(&self, funding: &FundingScope<P>) -> Vec<InboundHTLCDetails> {
+	fn get_pending_inbound_htlc_details<P: ChannelTransactionParametersAccess>(&self, funding: &FundingScope<P>) -> Vec<InboundHTLCDetails> {
 		let mut holding_cell_states = new_hash_map();
 		for holding_cell_update in self.holding_cell_htlc_updates.iter() {
 			match holding_cell_update {
@@ -5822,7 +5822,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 
 	/// Returns information on all pending outbound HTLCs.
 	#[rustfmt::skip]
-	pub fn get_pending_outbound_htlc_details<P: ChannelTransactionParametersAccess>(&self, funding: &FundingScope<P>) -> Vec<OutboundHTLCDetails> {
+	fn get_pending_outbound_htlc_details<P: ChannelTransactionParametersAccess>(&self, funding: &FundingScope<P>) -> Vec<OutboundHTLCDetails> {
 		let mut outbound_details = Vec::new();
 
 		let dust_buffer_feerate = self.get_dust_buffer_feerate(None);
@@ -6004,7 +6004,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 	///
 	/// Note that if [`Self::is_manual_broadcast`] is true the transaction will be a dummy
 	/// transaction.
-	pub fn unbroadcasted_funding<P: ChannelTransactionParametersAccess>(
+	fn unbroadcasted_funding<P: ChannelTransactionParametersAccess>(
 		&self, funding: &FundingScope<P>,
 	) -> Option<Transaction> {
 		self.if_unbroadcasted_funding(|| funding.funding_transaction.clone())
@@ -6012,7 +6012,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 
 	/// Returns the transaction ID if there is a pending funding transaction that is yet to be
 	/// broadcast.
-	pub fn unbroadcasted_funding_txid<P: ChannelTransactionParametersAccess>(
+	fn unbroadcasted_funding_txid<P: ChannelTransactionParametersAccess>(
 		&self, funding: &FundingScope<P>,
 	) -> Option<Txid> {
 		self.if_unbroadcasted_funding(|| {
@@ -6027,7 +6027,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 
 	/// Returns the transaction ID if there is a pending batch funding transaction that is yet to be
 	/// broadcast.
-	pub fn unbroadcasted_batch_funding_txid<P: ChannelTransactionParametersAccess>(
+	fn unbroadcasted_batch_funding_txid<P: ChannelTransactionParametersAccess>(
 		&self, funding: &FundingScope<P>,
 	) -> Option<Txid> {
 		self.unbroadcasted_funding_txid(funding).filter(|_| self.is_batch_funding())
@@ -6293,7 +6293,7 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 	/// of the channel type we tried, not of our ability to open any channel at all. We can see if a
 	/// downgrade of channel features would be possible so that we can still open the channel.
 	#[rustfmt::skip]
-	pub(crate) fn maybe_downgrade_channel_features<F: FeeEstimator>(
+	fn maybe_downgrade_channel_features<F: FeeEstimator>(
 		&mut self, funding: &mut FundingScope<PartialChannelTransactionParameters>, fee_estimator: &LowerBoundedFeeEstimator<F>,
 		user_config: &UserConfig, their_features: &InitFeatures,
 	) -> Result<(), ()> {
@@ -12241,7 +12241,7 @@ where
 	}
 
 	/// Checks during handling splice_init
-	pub fn validate_splice_init(
+	fn validate_splice_init(
 		&self, msg: &msgs::SpliceInit, our_funding_contribution: SignedAmount,
 	) -> Result<FundingScope<PartialChannelTransactionParameters>, ChannelError> {
 		if self.holder_commitment_point.current_point().is_none() {
@@ -13550,7 +13550,7 @@ where
 
 /// A not-yet-funded outbound (from holder) channel using V1 channel establishment.
 pub(super) struct OutboundV1Channel<SP: SignerProvider> {
-	pub(super) funding: FundingScope<PartialChannelTransactionParameters>,
+	funding: FundingScope<PartialChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 	/// We tried to send an `open_channel` message but our commitment point wasn't ready.
@@ -13803,7 +13803,7 @@ impl<SP: SignerProvider> OutboundV1Channel<SP> {
 /// An outbound channel using V1 channel establishment that has generated a `funding_created`
 /// message but has not yet received `funding_signed`.
 pub(super) struct PendingV1Channel<SP: SignerProvider> {
-	pub(super) funding: FundingScope<ChannelTransactionParameters>,
+	funding: FundingScope<ChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 }
@@ -13960,7 +13960,7 @@ impl<SP: SignerProvider> PendingV1Channel<SP> {
 
 /// A not-yet-funded inbound (from counterparty) channel using V1 channel establishment.
 pub(super) struct InboundV1Channel<SP: SignerProvider> {
-	pub(super) funding: FundingScope<PartialChannelTransactionParameters>,
+	funding: FundingScope<PartialChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 	pub signer_pending_accept_channel: bool,
@@ -14269,14 +14269,14 @@ impl<SP: SignerProvider> InboundV1Channel<SP> {
 /// A V2 channel that has completed funding transaction construction but has not yet
 /// received `commitment_signed`.
 pub(super) struct PendingV2Channel<SP: SignerProvider> {
-	pub(super) funding: FundingScope<ChannelTransactionParameters>,
+	funding: FundingScope<ChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 }
 
 // A not-yet-funded channel using V2 channel establishment.
 pub(super) struct UnfundedV2Channel<SP: SignerProvider> {
-	pub(super) funding: FundingScope<PartialChannelTransactionParameters>,
+	funding: FundingScope<PartialChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 	pub funding_negotiation_context: FundingNegotiationContext,
