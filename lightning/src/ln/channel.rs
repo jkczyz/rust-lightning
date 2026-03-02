@@ -6689,7 +6689,7 @@ impl FundingNegotiationContext {
 // Counterparty designates channel data owned by the another channel participant entity.
 #[cfg_attr(test, derive(Debug))]
 pub(super) struct FundedChannel<SP: SignerProvider> {
-	pub(super) funding: FundingScope<ChannelTransactionParameters>,
+	funding: FundingScope<ChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	holder_commitment_point: HolderCommitmentPoint,
 
@@ -6903,6 +6903,14 @@ where
 
 	pub fn get_funding_txo(&self) -> Option<OutPoint> {
 		self.funding.get_funding_txo()
+	}
+
+	pub fn unbroadcasted_funding(&self) -> Option<Transaction> {
+		self.context.unbroadcasted_funding(&self.funding)
+	}
+
+	pub fn unbroadcasted_batch_funding_txid(&self) -> Option<Txid> {
+		self.context.unbroadcasted_batch_funding_txid(&self.funding)
 	}
 
 	pub fn get_channel_type(&self) -> &ChannelTypeFeatures {

@@ -9837,9 +9837,8 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 
 						let chan = peer_state.channel_by_id.get_mut(&channel_id);
 						if let Some(funded_chan) = chan.and_then(Channel::as_funded_mut) {
-							batch_funding_tx = batch_funding_tx.or_else(|| {
-								funded_chan.context.unbroadcasted_funding(&funded_chan.funding)
-							});
+							batch_funding_tx =
+								batch_funding_tx.or_else(|| funded_chan.unbroadcasted_funding());
 							funded_chan.set_batch_ready();
 							batch_channels.push((counterparty_node_id, channel_id));
 
@@ -10341,8 +10340,7 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 				pending_msg_events.push(upd);
 			}
 
-			let unbroadcasted_batch_funding_txid =
-				chan.context.unbroadcasted_batch_funding_txid(&chan.funding);
+			let unbroadcasted_batch_funding_txid = chan.unbroadcasted_batch_funding_txid();
 
 			PostMonitorUpdateChanResume::Unblocked {
 				channel_id: chan_id,
@@ -12197,10 +12195,8 @@ This indicates a bug inside LDK. Please report this error at https://github.com/
 						// `ReleaseRAAChannelMonitorUpdate` action to the event generated when the
 						// outbound HTLC is claimed. This is guaranteed to all complete before we
 						// process the RAA as messages are processed from single peers serially.
-						funding_txo = chan
-							.funding
-							.get_funding_txo()
-							.expect("We won't accept a fulfill until funded");
+						funding_txo =
+							chan.get_funding_txo().expect("We won't accept a fulfill until funded");
 						next_user_channel_id = chan.context.get_user_id();
 						res
 					} else {
