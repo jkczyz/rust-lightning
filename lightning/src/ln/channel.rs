@@ -1492,6 +1492,7 @@ enum ChannelPhase<SP: SignerProvider> {
 	PendingV1(PendingV1Channel<SP>),
 	UnfundedInboundV1(InboundV1Channel<SP>),
 	UnfundedV2(UnfundedV2Channel<SP>),
+	PendingV2(PendingV2Channel<SP>),
 	Funded(FundedChannel<SP>),
 }
 
@@ -1507,6 +1508,7 @@ where
 			ChannelPhase::PendingV1(chan) => &chan.context,
 			ChannelPhase::UnfundedInboundV1(chan) => &chan.context,
 			ChannelPhase::UnfundedV2(chan) => &chan.context,
+			ChannelPhase::PendingV2(chan) => &chan.context,
 		}
 	}
 
@@ -1518,6 +1520,7 @@ where
 			ChannelPhase::PendingV1(chan) => &mut chan.context,
 			ChannelPhase::UnfundedInboundV1(chan) => &mut chan.context,
 			ChannelPhase::UnfundedV2(chan) => &mut chan.context,
+			ChannelPhase::PendingV2(chan) => &mut chan.context,
 		}
 	}
 
@@ -1529,6 +1532,7 @@ where
 			ChannelPhase::PendingV1(chan) => chan.funding.is_outbound(),
 			ChannelPhase::UnfundedInboundV1(chan) => chan.funding.is_outbound(),
 			ChannelPhase::UnfundedV2(chan) => chan.funding.is_outbound(),
+			ChannelPhase::PendingV2(chan) => chan.funding.is_outbound(),
 		}
 	}
 
@@ -1540,6 +1544,7 @@ where
 			ChannelPhase::PendingV1(chan) => chan.funding.get_channel_type(),
 			ChannelPhase::UnfundedInboundV1(chan) => chan.funding.get_channel_type(),
 			ChannelPhase::UnfundedV2(chan) => chan.funding.get_channel_type(),
+			ChannelPhase::PendingV2(chan) => chan.funding.get_channel_type(),
 		}
 	}
 
@@ -1551,6 +1556,7 @@ where
 			ChannelPhase::PendingV1(chan) => chan.funding.get_funding_txo(),
 			ChannelPhase::UnfundedInboundV1(chan) => chan.funding.get_funding_txo(),
 			ChannelPhase::UnfundedV2(chan) => chan.funding.get_funding_txo(),
+			ChannelPhase::PendingV2(chan) => chan.funding.get_funding_txo(),
 		}
 	}
 
@@ -1563,6 +1569,7 @@ where
 			ChannelPhase::PendingV1(chan) => chan.funding.get_short_channel_id(),
 			ChannelPhase::UnfundedInboundV1(chan) => chan.funding.get_short_channel_id(),
 			ChannelPhase::UnfundedV2(chan) => chan.funding.get_short_channel_id(),
+			ChannelPhase::PendingV2(chan) => chan.funding.get_short_channel_id(),
 		}
 	}
 
@@ -1599,6 +1606,9 @@ where
 			ChannelPhase::UnfundedV2(chan) => super::channel_state::ChannelDetails::from_channel_parts(
 				context, &chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
 			),
+			ChannelPhase::PendingV2(chan) => super::channel_state::ChannelDetails::from_channel_parts(
+				context, &chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
+			),
 		}
 	}
 
@@ -1613,6 +1623,7 @@ where
 			ChannelPhase::PendingV1(chan) => Some(&mut chan.unfunded_context),
 			ChannelPhase::UnfundedInboundV1(chan) => Some(&mut chan.unfunded_context),
 			ChannelPhase::UnfundedV2(chan) => Some(&mut chan.unfunded_context),
+			ChannelPhase::PendingV2(chan) => Some(&mut chan.unfunded_context),
 		}
 	}
 
@@ -1764,7 +1775,7 @@ where
 					shutdown_result: None,
 				}))
 			},
-			ChannelPhase::UnfundedV2(_) => Ok(None),
+			ChannelPhase::UnfundedV2(_) | ChannelPhase::PendingV2(_) => Ok(None),
 		}
 	}
 
@@ -1788,7 +1799,7 @@ where
 			// support replaying the funding handshake on reconnection.
 			ChannelPhase::PendingV1(_) => false,
 			ChannelPhase::UnfundedInboundV1(_) => false,
-			ChannelPhase::UnfundedV2(_) => false,
+			ChannelPhase::UnfundedV2(_) | ChannelPhase::PendingV2(_) => false,
 		};
 
 		let splice_funding_failed = if let ChannelPhase::Funded(chan) = &mut self.phase {
@@ -1861,6 +1872,11 @@ where
 					ReconnectionMsg::None
 				}
 			},
+			ChannelPhase::PendingV2(_) => {
+				// PendingV2 channels are not resumable, so this shouldn't be reached.
+				debug_assert!(false);
+				ReconnectionMsg::None
+			},
 		}
 	}
 
@@ -1879,7 +1895,7 @@ where
 				)
 					.map(|msg| Some(OpenChannelMessage::V1(msg)))
 			},
-			ChannelPhase::PendingV1(_) => Ok(None),
+			ChannelPhase::PendingV1(_) | ChannelPhase::PendingV2(_) => Ok(None),
 			ChannelPhase::UnfundedInboundV1(_) => Ok(None),
 			ChannelPhase::UnfundedV2(chan) => {
 				if chan.funding.is_outbound() {
@@ -1912,6 +1928,7 @@ where
 			ChannelPhase::Undefined => unreachable!(),
 			ChannelPhase::UnfundedOutboundV1(_)
 			| ChannelPhase::PendingV1(_)
+			| ChannelPhase::PendingV2(_)
 			| ChannelPhase::UnfundedInboundV1(_) => (None, false),
 			ChannelPhase::UnfundedV2(pending_v2_channel) => {
 				pending_v2_channel.interactive_tx_constructor.take();
@@ -2093,6 +2110,10 @@ where
 				let had_constructor =
 					pending_v2_channel.interactive_tx_constructor.take().is_some();
 				(had_constructor, None, false)
+			},
+			ChannelPhase::PendingV2(chan) => {
+				let had_session = chan.context.interactive_tx_signing_session.take().is_some();
+				(had_session, None, false)
 			},
 			ChannelPhase::Funded(funded_channel) => {
 				if funded_channel.has_pending_splice_awaiting_signatures()
@@ -2512,6 +2533,9 @@ where
 			ChannelPhase::UnfundedV2(chan) => {
 				chan.context.force_shutdown(&chan.funding, closure_reason)
 			},
+			ChannelPhase::PendingV2(chan) => {
+				chan.context.force_shutdown(&chan.funding, closure_reason)
+			},
 		}
 	}
 
@@ -2636,6 +2660,9 @@ where
 			ChannelPhase::UnfundedV2(chan) => {
 				chan.context.get_available_balances_for_scope(&chan.funding, fee_estimator)
 			},
+			ChannelPhase::PendingV2(chan) => {
+				chan.context.get_available_balances_for_scope(&chan.funding, fee_estimator)
+			},
 		}
 	}
 
@@ -2647,6 +2674,7 @@ where
 			ChannelPhase::PendingV1(chan) => chan.context.minimum_depth(&chan.funding),
 			ChannelPhase::UnfundedInboundV1(chan) => chan.context.minimum_depth(&chan.funding),
 			ChannelPhase::UnfundedV2(chan) => chan.context.minimum_depth(&chan.funding),
+			ChannelPhase::PendingV2(chan) => chan.context.minimum_depth(&chan.funding),
 		}
 	}
 }
@@ -2684,6 +2712,15 @@ where
 {
 	fn from(channel: UnfundedV2Channel<SP>) -> Self {
 		Channel { phase: ChannelPhase::UnfundedV2(channel) }
+	}
+}
+
+impl<SP: SignerProvider> From<PendingV2Channel<SP>> for Channel<SP>
+where
+	SP::EcdsaSigner: ChannelSigner,
+{
+	fn from(channel: PendingV2Channel<SP>) -> Self {
+		Channel { phase: ChannelPhase::PendingV2(channel) }
 	}
 }
 
@@ -14133,6 +14170,14 @@ impl<SP: SignerProvider> InboundV1Channel<SP> {
 			self.generate_accept_channel_message(logger)
 		} else { None }
 	}
+}
+
+/// A V2 channel that has completed funding transaction construction but has not yet
+/// received `commitment_signed`.
+pub(super) struct PendingV2Channel<SP: SignerProvider> {
+	pub funding: FundingScope<ChannelTransactionParameters>,
+	pub context: ChannelContext<SP>,
+	pub unfunded_context: UnfundedChannelContext,
 }
 
 // A not-yet-funded channel using V2 channel establishment.
