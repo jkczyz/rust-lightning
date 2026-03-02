@@ -86,9 +86,9 @@ fn do_test_counterparty_no_reserve(send_from_initiator: bool) {
 		);
 		assert!(channel.is_unfunded_v1());
 		if let Some(chan) = channel.as_unfunded_outbound_v1_mut() {
-			chan.funding.holder_selected_channel_reserve_satoshis = 0;
+			chan.set_holder_selected_channel_reserve_satoshis(0);
 		} else if let Some(chan) = channel.as_unfunded_inbound_v1_mut() {
-			chan.funding.holder_selected_channel_reserve_satoshis = 0;
+			chan.set_holder_selected_channel_reserve_satoshis(0);
 		} else {
 			panic!("expected unfunded v1 channel");
 		}
@@ -911,13 +911,12 @@ pub fn do_test_fee_spike_buffer(cfg: Option<UserConfig>, htlc_fails: bool) {
 		let channel = get_channel_ref!(nodes[0], nodes[1], per_peer_lock, peer_state_lock, chan.2);
 		let chan_signer = channel.as_funded().unwrap().get_signer();
 
-		let complete_params =
-			channel.as_funded().unwrap().funding.channel_transaction_parameters.clone();
+		let complete_params = channel.as_funded().unwrap().get_channel_transaction_parameters();
 		let (commitment_tx, _stats) = SpecTxBuilder {}.build_commitment_transaction(
 			false,
 			commitment_number,
 			&remote_point,
-			&complete_params,
+			complete_params,
 			&secp_ctx,
 			local_chan_balance_msat,
 			vec![accepted_htlc_info],
@@ -929,7 +928,7 @@ pub fn do_test_fee_spike_buffer(cfg: Option<UserConfig>, htlc_fails: bool) {
 			.as_ecdsa()
 			.unwrap()
 			.sign_counterparty_commitment(
-				&complete_params,
+				complete_params,
 				&commitment_tx,
 				Vec::new(),
 				Vec::new(),
@@ -2212,7 +2211,7 @@ pub fn do_test_dust_limit_fee_accounting(can_afford: bool) {
 		let chan =
 			get_channel_ref!(nodes[1], nodes[0], per_peer_state_lock, peer_state_lock, chan_id);
 		assert_eq!(
-			chan.as_funded().unwrap().funding.holder_selected_channel_reserve_satoshis,
+			chan.as_funded().unwrap().get_holder_selected_channel_reserve_satoshis(),
 			channel_reserve_satoshis
 		);
 	}
@@ -2372,8 +2371,7 @@ pub fn do_test_dust_limit_fee_accounting(can_afford: bool) {
 				get_channel_ref!(nodes[0], nodes[1], per_peer_lock, peer_state_lock, chan_id);
 			let chan_signer = channel.as_funded().unwrap().get_signer();
 
-			let complete_params =
-				channel.as_funded().unwrap().funding.channel_transaction_parameters.clone();
+			let complete_params = channel.as_funded().unwrap().get_channel_transaction_parameters();
 			let commitment_tx = CommitmentTransaction::new(
 				commitment_number,
 				&remote_point,
@@ -2388,7 +2386,7 @@ pub fn do_test_dust_limit_fee_accounting(can_afford: bool) {
 				.as_ecdsa()
 				.unwrap()
 				.sign_counterparty_commitment(
-					&complete_params,
+					complete_params,
 					&commitment_tx,
 					Vec::new(),
 					Vec::new(),

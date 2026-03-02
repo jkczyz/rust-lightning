@@ -246,10 +246,7 @@ fn do_test_supports_channel_type(config: UserConfig, expected_channel_type: Chan
 		&logger,
 	)
 	.unwrap();
-	assert_eq!(
-		channel_a.funding.get_channel_type(),
-		&ChannelTypeFeatures::only_static_remote_key()
-	);
+	assert_eq!(channel_a.get_channel_type(), &ChannelTypeFeatures::only_static_remote_key());
 
 	let mut channel_a = OutboundV1Channel::<&TestKeysInterface>::new(
 		&fee_estimator,
@@ -286,8 +283,8 @@ fn do_test_supports_channel_type(config: UserConfig, expected_channel_type: Chan
 	)
 	.unwrap();
 
-	assert_eq!(channel_a.funding.get_channel_type(), &expected_channel_type);
-	assert_eq!(channel_b.funding.get_channel_type(), &expected_channel_type);
+	assert_eq!(channel_a.get_channel_type(), &expected_channel_type);
+	assert_eq!(channel_b.get_channel_type(), &expected_channel_type);
 
 	if expected_channel_type.supports_anchor_zero_fee_commitments() {
 		assert_eq!(channel_a.context.feerate_per_kw, 0);
@@ -354,8 +351,7 @@ fn test_rejects_if_channel_type_not_set() {
 	);
 	assert!(channel_b.is_err());
 
-	open_channel_msg.common_fields.channel_type =
-		Some(channel_a.funding.get_channel_type().clone());
+	open_channel_msg.common_fields.channel_type = Some(channel_a.get_channel_type().clone());
 	let mut channel_b = InboundV1Channel::<&TestKeysInterface>::new(
 		&fee_estimator,
 		&&keys_provider,

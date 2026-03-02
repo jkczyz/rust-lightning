@@ -8777,7 +8777,7 @@ fn do_test_max_dust_htlc_exposure(
 		let chan = chan_lock.channel_by_id.get(&channel_id).unwrap();
 		let dust_buffer_feerate = chan.context().get_dust_buffer_feerate(None);
 		let (htlc_success_tx_fee_sat, htlc_timeout_tx_fee_sat) = second_stage_tx_fees_sat(
-			&chan.as_funded().unwrap().funding.get_channel_type(),
+			&chan.as_funded().unwrap().get_channel_type(),
 			dust_buffer_feerate,
 		);
 		(

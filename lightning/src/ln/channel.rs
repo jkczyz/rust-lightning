@@ -4447,6 +4447,12 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 		return &mut self.holder_signer;
 	}
 
+	/// Returns the holder signer for this channel.
+	#[cfg(any(test, feature = "_test_utils"))]
+	pub fn get_signer(&self) -> &ChannelSignerType<SP> {
+		return &self.holder_signer;
+	}
+
 	/// Only allowed immediately after deserialization if get_outbound_scid_alias returns 0,
 	/// indicating we were written by LDK prior to 0.0.106 which did not set outbound SCID aliases
 	/// or prior to any channel actions during `Channel` initialization.
@@ -6913,6 +6919,16 @@ where
 
 	pub fn is_outbound(&self) -> bool {
 		self.funding.is_outbound()
+	}
+
+	#[cfg(test)]
+	pub fn get_channel_transaction_parameters(&self) -> &ChannelTransactionParameters {
+		&self.funding.channel_transaction_parameters
+	}
+
+	#[cfg(test)]
+	pub fn get_holder_selected_channel_reserve_satoshis(&self) -> u64 {
+		self.funding.holder_selected_channel_reserve_satoshis
 	}
 
 	pub fn get_funding_tx_confirmation_height(&self) -> Option<u32> {
@@ -13526,7 +13542,7 @@ where
 
 /// A not-yet-funded outbound (from holder) channel using V1 channel establishment.
 pub(super) struct OutboundV1Channel<SP: SignerProvider> {
-	pub funding: FundingScope<PartialChannelTransactionParameters>,
+	pub(super) funding: FundingScope<PartialChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 	/// We tried to send an `open_channel` message but our commitment point wasn't ready.
@@ -13542,6 +13558,16 @@ impl<SP: SignerProvider> OutboundV1Channel<SP> {
 
 	pub fn get_funding_redeemscript(&self) -> ScriptBuf {
 		self.funding.get_funding_redeemscript()
+	}
+
+	#[cfg(test)]
+	pub fn get_channel_type(&self) -> &ChannelTypeFeatures {
+		self.funding.get_channel_type()
+	}
+
+	#[cfg(test)]
+	pub fn set_holder_selected_channel_reserve_satoshis(&mut self, val: u64) {
+		self.funding.holder_selected_channel_reserve_satoshis = val;
 	}
 
 	pub fn abandon_unfunded_chan(&mut self, closure_reason: ClosureReason) -> ShutdownResult {
@@ -13769,7 +13795,7 @@ impl<SP: SignerProvider> OutboundV1Channel<SP> {
 /// An outbound channel using V1 channel establishment that has generated a `funding_created`
 /// message but has not yet received `funding_signed`.
 pub(super) struct PendingV1Channel<SP: SignerProvider> {
-	pub funding: FundingScope<ChannelTransactionParameters>,
+	pub(super) funding: FundingScope<ChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 }
@@ -13926,7 +13952,7 @@ impl<SP: SignerProvider> PendingV1Channel<SP> {
 
 /// A not-yet-funded inbound (from counterparty) channel using V1 channel establishment.
 pub(super) struct InboundV1Channel<SP: SignerProvider> {
-	pub funding: FundingScope<PartialChannelTransactionParameters>,
+	pub(super) funding: FundingScope<PartialChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 	pub signer_pending_accept_channel: bool,
@@ -13964,6 +13990,16 @@ pub(super) fn channel_type_from_open_channel(
 }
 
 impl<SP: SignerProvider> InboundV1Channel<SP> {
+	#[cfg(test)]
+	pub fn get_channel_type(&self) -> &ChannelTypeFeatures {
+		self.funding.get_channel_type()
+	}
+
+	#[cfg(test)]
+	pub fn set_holder_selected_channel_reserve_satoshis(&mut self, val: u64) {
+		self.funding.holder_selected_channel_reserve_satoshis = val;
+	}
+
 	/// Creates a new channel from a remote sides' request for one.
 	/// Assumes chain_hash has already been checked and corresponds with what we expect!
 	#[rustfmt::skip]
@@ -14225,14 +14261,14 @@ impl<SP: SignerProvider> InboundV1Channel<SP> {
 /// A V2 channel that has completed funding transaction construction but has not yet
 /// received `commitment_signed`.
 pub(super) struct PendingV2Channel<SP: SignerProvider> {
-	pub funding: FundingScope<ChannelTransactionParameters>,
+	pub(super) funding: FundingScope<ChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 }
 
 // A not-yet-funded channel using V2 channel establishment.
 pub(super) struct UnfundedV2Channel<SP: SignerProvider> {
-	pub funding: FundingScope<PartialChannelTransactionParameters>,
+	pub(super) funding: FundingScope<PartialChannelTransactionParameters>,
 	pub context: ChannelContext<SP>,
 	pub unfunded_context: UnfundedChannelContext,
 	pub funding_negotiation_context: FundingNegotiationContext,
