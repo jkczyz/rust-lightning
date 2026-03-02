@@ -15,8 +15,7 @@ use bitcoin::secp256k1::PublicKey;
 
 use crate::chain::chaininterface::{FeeEstimator, LowerBoundedFeeEstimator};
 use crate::chain::transaction::OutPoint;
-use crate::ln::chan_utils::ChannelTransactionParametersAccess;
-use crate::ln::channel::{AvailableBalances, Channel, ChannelContext, FundingScope};
+use crate::ln::channel::Channel;
 use crate::ln::types::ChannelId;
 use crate::sign::SignerProvider;
 use crate::types::features::{ChannelTypeFeatures, InitFeatures};
@@ -525,77 +524,6 @@ impl ChannelDetails {
 		fee_estimator: &LowerBoundedFeeEstimator<F>,
 	) -> Self {
 		channel.channel_details(best_block_height, latest_features, fee_estimator)
-	}
-
-	#[rustfmt::skip]
-	pub(super) fn from_channel_parts<SP: SignerProvider, P: ChannelTransactionParametersAccess, F: FeeEstimator>(
-		context: &ChannelContext<SP>, funding: &FundingScope<P>,
-		balance: AvailableBalances, minimum_depth: Option<u32>,
-		best_block_height: u32, latest_features: InitFeatures,
-		_fee_estimator: &LowerBoundedFeeEstimator<F>,
-	) -> Self {
-		let (to_remote_reserve_satoshis, to_self_reserve_satoshis) =
-			funding.get_holder_counterparty_selected_channel_reserve_satoshis();
-		#[allow(deprecated)] // TODO: Remove once balance_msat is removed.
-		ChannelDetails {
-			channel_id: context.channel_id(),
-			counterparty: ChannelCounterparty {
-				node_id: context.get_counterparty_node_id(),
-				features: latest_features,
-				unspendable_punishment_reserve: to_remote_reserve_satoshis,
-				forwarding_info: context.counterparty_forwarding_info(),
-				// Ensures that we have actually received the `htlc_minimum_msat` value
-				// from the counterparty through the `OpenChannel` or `AcceptChannel`
-				// message (as they are always the first message from the counterparty).
-				// Else `Channel::get_counterparty_htlc_minimum_msat` could return the
-				// default `0` value set by `Channel::new_outbound`.
-				outbound_htlc_minimum_msat: if context.have_received_message() {
-					Some(context.get_counterparty_htlc_minimum_msat())
-				} else {
-					None
-				},
-				outbound_htlc_maximum_msat: context.get_counterparty_htlc_maximum_msat(funding),
-			},
-			funding_txo: funding.get_funding_txo(),
-			funding_redeem_script: funding
-				.channel_transaction_parameters
-				.make_funding_redeemscript_opt(),
-			// Note that accept_channel (or open_channel) is always the first message, so
-			// `have_received_message` indicates that type negotiation has completed.
-			channel_type: if context.have_received_message() {
-				Some(funding.get_channel_type().clone())
-			} else {
-				None
-			},
-			short_channel_id: funding.get_short_channel_id(),
-			outbound_scid_alias: if context.is_usable() {
-				Some(context.outbound_scid_alias())
-			} else {
-				None
-			},
-			inbound_scid_alias: context.latest_inbound_scid_alias(),
-			channel_value_satoshis: funding.get_value_satoshis(),
-			feerate_sat_per_1000_weight: Some(context.get_feerate_sat_per_1000_weight()),
-			unspendable_punishment_reserve: to_self_reserve_satoshis,
-			inbound_capacity_msat: balance.inbound_capacity_msat,
-			outbound_capacity_msat: balance.outbound_capacity_msat,
-			next_outbound_htlc_limit_msat: balance.next_outbound_htlc_limit_msat,
-			next_outbound_htlc_minimum_msat: balance.next_outbound_htlc_minimum_msat,
-			user_channel_id: context.get_user_id(),
-			confirmations_required: minimum_depth,
-			confirmations: Some(funding.get_funding_tx_confirmations(best_block_height)),
-			force_close_spend_delay: funding.get_counterparty_selected_contest_delay(),
-			is_outbound: funding.is_outbound(),
-			is_channel_ready: context.is_usable(),
-			is_usable: context.is_live(),
-			is_announced: context.should_announce(),
-			inbound_htlc_minimum_msat: Some(context.get_holder_htlc_minimum_msat()),
-			inbound_htlc_maximum_msat: context.get_holder_htlc_maximum_msat(funding),
-			config: Some(context.config()),
-			channel_shutdown_state: Some(context.shutdown_state()),
-			pending_inbound_htlcs: context.get_pending_inbound_htlc_details(funding),
-			pending_outbound_htlcs: context.get_pending_outbound_htlc_details(funding),
-		}
 	}
 }
 

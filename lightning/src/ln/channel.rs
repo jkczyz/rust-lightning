@@ -1591,23 +1591,23 @@ where
 		let minimum_depth = self.minimum_depth();
 		match &self.phase {
 			ChannelPhase::Undefined => unreachable!(),
-			ChannelPhase::Funded(chan) => super::channel_state::ChannelDetails::from_channel_parts(
-				context, &chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
+			ChannelPhase::Funded(chan) => context.build_channel_details(
+				&chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
 			),
-			ChannelPhase::UnfundedOutboundV1(chan) => super::channel_state::ChannelDetails::from_channel_parts(
-				context, &chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
+			ChannelPhase::UnfundedOutboundV1(chan) => context.build_channel_details(
+				&chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
 			),
-			ChannelPhase::PendingV1(chan) => super::channel_state::ChannelDetails::from_channel_parts(
-				context, &chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
+			ChannelPhase::PendingV1(chan) => context.build_channel_details(
+				&chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
 			),
-			ChannelPhase::UnfundedInboundV1(chan) => super::channel_state::ChannelDetails::from_channel_parts(
-				context, &chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
+			ChannelPhase::UnfundedInboundV1(chan) => context.build_channel_details(
+				&chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
 			),
-			ChannelPhase::UnfundedV2(chan) => super::channel_state::ChannelDetails::from_channel_parts(
-				context, &chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
+			ChannelPhase::UnfundedV2(chan) => context.build_channel_details(
+				&chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
 			),
-			ChannelPhase::PendingV2(chan) => super::channel_state::ChannelDetails::from_channel_parts(
-				context, &chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
+			ChannelPhase::PendingV2(chan) => context.build_channel_details(
+				&chan.funding, balance, minimum_depth, best_block_height, latest_features, fee_estimator,
 			),
 		}
 	}
@@ -5855,6 +5855,77 @@ impl<SP: SignerProvider> ChannelContext<SP> {
 			}
 		}
 		outbound_details
+	}
+
+	#[rustfmt::skip]
+	fn build_channel_details<P: ChannelTransactionParametersAccess, F: FeeEstimator>(
+		&self, funding: &FundingScope<P>,
+		balance: AvailableBalances, minimum_depth: Option<u32>,
+		best_block_height: u32, latest_features: InitFeatures,
+		_fee_estimator: &LowerBoundedFeeEstimator<F>,
+	) -> super::channel_state::ChannelDetails {
+		let (to_remote_reserve_satoshis, to_self_reserve_satoshis) =
+			funding.get_holder_counterparty_selected_channel_reserve_satoshis();
+		#[allow(deprecated)] // TODO: Remove once balance_msat is removed.
+		super::channel_state::ChannelDetails {
+			channel_id: self.channel_id(),
+			counterparty: super::channel_state::ChannelCounterparty {
+				node_id: self.get_counterparty_node_id(),
+				features: latest_features,
+				unspendable_punishment_reserve: to_remote_reserve_satoshis,
+				forwarding_info: self.counterparty_forwarding_info(),
+				// Ensures that we have actually received the `htlc_minimum_msat` value
+				// from the counterparty through the `OpenChannel` or `AcceptChannel`
+				// message (as they are always the first message from the counterparty).
+				// Else `Channel::get_counterparty_htlc_minimum_msat` could return the
+				// default `0` value set by `Channel::new_outbound`.
+				outbound_htlc_minimum_msat: if self.have_received_message() {
+					Some(self.get_counterparty_htlc_minimum_msat())
+				} else {
+					None
+				},
+				outbound_htlc_maximum_msat: self.get_counterparty_htlc_maximum_msat(funding),
+			},
+			funding_txo: funding.get_funding_txo(),
+			funding_redeem_script: funding
+				.channel_transaction_parameters
+				.make_funding_redeemscript_opt(),
+			// Note that accept_channel (or open_channel) is always the first message, so
+			// `have_received_message` indicates that type negotiation has completed.
+			channel_type: if self.have_received_message() {
+				Some(funding.get_channel_type().clone())
+			} else {
+				None
+			},
+			short_channel_id: funding.get_short_channel_id(),
+			outbound_scid_alias: if self.is_usable() {
+				Some(self.outbound_scid_alias())
+			} else {
+				None
+			},
+			inbound_scid_alias: self.latest_inbound_scid_alias(),
+			channel_value_satoshis: funding.get_value_satoshis(),
+			feerate_sat_per_1000_weight: Some(self.get_feerate_sat_per_1000_weight()),
+			unspendable_punishment_reserve: to_self_reserve_satoshis,
+			inbound_capacity_msat: balance.inbound_capacity_msat,
+			outbound_capacity_msat: balance.outbound_capacity_msat,
+			next_outbound_htlc_limit_msat: balance.next_outbound_htlc_limit_msat,
+			next_outbound_htlc_minimum_msat: balance.next_outbound_htlc_minimum_msat,
+			user_channel_id: self.get_user_id(),
+			confirmations_required: minimum_depth,
+			confirmations: Some(funding.get_funding_tx_confirmations(best_block_height)),
+			force_close_spend_delay: funding.get_counterparty_selected_contest_delay(),
+			is_outbound: funding.is_outbound(),
+			is_channel_ready: self.is_usable(),
+			is_usable: self.is_live(),
+			is_announced: self.should_announce(),
+			inbound_htlc_minimum_msat: Some(self.get_holder_htlc_minimum_msat()),
+			inbound_htlc_maximum_msat: self.get_holder_htlc_maximum_msat(funding),
+			config: Some(self.config()),
+			channel_shutdown_state: Some(self.shutdown_state()),
+			pending_inbound_htlcs: self.get_pending_inbound_htlc_details(funding),
+			pending_outbound_htlcs: self.get_pending_outbound_htlc_details(funding),
+		}
 	}
 
 	fn get_available_balances_for_scope<P: ChannelTransactionParametersAccess, F: FeeEstimator>(
