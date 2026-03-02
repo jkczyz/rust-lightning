@@ -2228,8 +2228,9 @@ where
 	}
 
 	fn funding_tx_constructed(&mut self, funding_outpoint: OutPoint) -> Result<(), AbortReason> {
-		let interactive_tx_constructor = match &mut self.phase {
-			ChannelPhase::UnfundedV2(chan) => {
+		let phase = core::mem::replace(&mut self.phase, ChannelPhase::Undefined);
+		let result = match phase {
+			ChannelPhase::UnfundedV2(mut chan) => {
 				debug_assert_eq!(
 					chan.context.channel_state,
 					ChannelState::NegotiatingFunding(
@@ -2247,12 +2248,27 @@ where
 				chan.funding.channel_transaction_parameters.funding_outpoint =
 					Some(funding_outpoint);
 
-				chan.interactive_tx_constructor
+				let interactive_tx_constructor = chan
+					.interactive_tx_constructor
 					.take()
-					.expect("UnfundedV2Channel::interactive_tx_constructor should be set")
+					.expect("UnfundedV2Channel::interactive_tx_constructor should be set");
+				let funding = chan
+					.funding
+					.into_complete()
+					.expect("funding params must be complete after tx construction");
+
+				let signing_session = interactive_tx_constructor.into_signing_session();
+				chan.context.interactive_tx_signing_session = Some(signing_session);
+
+				self.phase = ChannelPhase::PendingV2(PendingV2Channel {
+					funding,
+					context: chan.context,
+					unfunded_context: chan.unfunded_context,
+				});
+				Ok(())
 			},
-			ChannelPhase::Funded(chan) => {
-				if let Some(pending_splice) = chan.pending_splice.as_mut() {
+			ChannelPhase::Funded(mut chan) => {
+				let result = if let Some(pending_splice) = chan.pending_splice.as_mut() {
 					let funding_negotiation = pending_splice.funding_negotiation.take();
 					if let Some(FundingNegotiation::ConstructingTransaction {
 						mut funding,
@@ -2271,51 +2287,44 @@ where
 								funding,
 								initial_commitment_signed_from_counterparty: None,
 							});
-						interactive_tx_constructor
+
+						let signing_session = interactive_tx_constructor.into_signing_session();
+						chan.context.interactive_tx_signing_session = Some(signing_session);
+						Ok(())
 					} else {
 						// Replace the taken state for later error handling
 						pending_splice.funding_negotiation = funding_negotiation;
-						return Err(AbortReason::InternalError(
+						Err(AbortReason::InternalError(
 							"Got a tx_complete message in an invalid state",
-						));
+						))
 					}
 				} else {
-					return Err(AbortReason::InternalError(
-						"Got a tx_complete message in an invalid state",
-					));
-				}
+					Err(AbortReason::InternalError("Got a tx_complete message in an invalid state"))
+				};
+				self.phase = ChannelPhase::Funded(chan);
+				result
 			},
 			_ => {
+				self.phase = phase;
 				debug_assert!(false);
-				return Err(AbortReason::InternalError(
-					"Got a tx_complete message in an invalid phase",
-				));
+				Err(AbortReason::InternalError("Got a tx_complete message in an invalid phase"))
 			},
 		};
 
-		let signing_session = interactive_tx_constructor.into_signing_session();
-		self.context_mut().interactive_tx_signing_session = Some(signing_session);
-		Ok(())
+		debug_assert!(!matches!(self.phase, ChannelPhase::Undefined));
+		result
 	}
 
 	pub fn funding_transaction_signed<F: FeeEstimator, L: Logger>(
 		&mut self, funding_txid_signed: Txid, witnesses: Vec<Witness>, best_block_height: u32,
 		fee_estimator: &LowerBoundedFeeEstimator<F>, logger: &L,
 	) -> Result<FundingTxSigned, APIError> {
-		enum FundingRef<'a> {
-			Partial(&'a FundingScope<PartialChannelTransactionParameters>),
-			Complete(&'a FundingScope<ChannelTransactionParameters>),
-		}
 		let (context, funding, pending_splice) = match &mut self.phase {
 			ChannelPhase::Undefined => unreachable!(),
-			ChannelPhase::UnfundedV2(channel) => {
-				(&mut channel.context, FundingRef::Partial(&channel.funding), None)
+			ChannelPhase::PendingV2(channel) => (&mut channel.context, &channel.funding, None),
+			ChannelPhase::Funded(channel) => {
+				(&mut channel.context, &channel.funding, channel.pending_splice.as_ref())
 			},
-			ChannelPhase::Funded(channel) => (
-				&mut channel.context,
-				FundingRef::Complete(&channel.funding),
-				channel.pending_splice.as_ref(),
-			),
 			_ => {
 				return Err(APIError::APIMisuseError {
 					err: format!(
@@ -2358,11 +2367,7 @@ where
 
 			signing_session
 		} else {
-			let funding_txid = match &funding {
-				FundingRef::Partial(f) => f.get_funding_txid(),
-				FundingRef::Complete(f) => f.get_funding_txid(),
-			};
-			if Some(funding_txid_signed) == funding_txid {
+			if Some(funding_txid_signed) == funding.get_funding_txid() {
 				// We may be handling a duplicate call and the funding was already locked so we
 				// no longer have the signing session present.
 				return Ok(FundingTxSigned {
@@ -2387,15 +2392,9 @@ where
 
 		let shared_input_signature =
 			if let Some(splice_input_index) = signing_session.unsigned_tx().shared_input_index() {
-				// UnfundedV2 channels (FundingRef::Partial) don't have shared inputs since
-				// pending_splice is None, so only FundingRef::Complete reaches here.
-				let complete_params: &ChannelTransactionParameters = match &funding {
-					FundingRef::Partial(_) => unreachable!(),
-					FundingRef::Complete(f) => &f.channel_transaction_parameters,
-				};
 				let sig = match &context.holder_signer {
 					ChannelSignerType::Ecdsa(signer) => signer.sign_splice_shared_input(
-						complete_params,
+						&funding.channel_transaction_parameters,
 						tx,
 						splice_input_index as usize,
 						&context.secp_ctx,
@@ -2438,19 +2437,11 @@ where
 				&&logger,
 			)
 		} else {
-			match &funding {
-				FundingRef::Partial(f) => {
-					let channel_parameters = f.channel_transaction_parameters.to_complete().expect(
-						"channel_transaction_parameters must be complete after tx construction",
-					);
-					context.get_initial_commitment_signed_v2(*f, &channel_parameters, &&logger)
-				},
-				FundingRef::Complete(f) => context.get_initial_commitment_signed_v2(
-					*f,
-					&f.channel_transaction_parameters,
-					&&logger,
-				),
-			}
+			context.get_initial_commitment_signed_v2(
+				funding,
+				&funding.channel_transaction_parameters,
+				&&logger,
+			)
 		};
 
 		// For zero conf channels, we don't expect the funding transaction to be ready for broadcast
@@ -2545,7 +2536,7 @@ where
 	) -> Result<(Option<ChannelMonitor<SP::EcdsaSigner>>, Option<ChannelMonitorUpdate>), ChannelError> {
 		let phase = core::mem::replace(&mut self.phase, ChannelPhase::Undefined);
 		match phase {
-			ChannelPhase::UnfundedV2(chan) => {
+			ChannelPhase::PendingV2(chan) => {
 				let holder_commitment_point = match chan.unfunded_context.holder_commitment_point {
 					Some(point) => point,
 					None => {
@@ -2556,12 +2547,8 @@ where
 								channel_id)));
 					}
 				};
-				let funding = chan.funding.into_complete()
-					.ok_or_else(|| ChannelError::close(
-						"Channel transaction parameters must be complete for funded channel".to_owned()
-					))?;
 				let mut funded_channel = FundedChannel {
-					funding,
+					funding: chan.funding,
 					context: chan.context,
 					holder_commitment_point,
 					pending_splice: None,

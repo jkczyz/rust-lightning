@@ -1220,20 +1220,6 @@ impl PartialChannelTransactionParameters {
 			channel_value_satoshis: self.channel_value_satoshis,
 		})
 	}
-
-	/// Converts to the complete type by cloning. Returns `None` if not populated.
-	pub(crate) fn to_complete(&self) -> Option<ChannelTransactionParameters> {
-		Some(ChannelTransactionParameters {
-			holder_pubkeys: self.holder_pubkeys.clone(),
-			holder_selected_contest_delay: self.holder_selected_contest_delay,
-			is_outbound_from_holder: self.is_outbound_from_holder,
-			counterparty_parameters: self.counterparty_parameters.clone()?,
-			funding_outpoint: self.funding_outpoint?,
-			splice_parent_funding_txid: self.splice_parent_funding_txid,
-			channel_type_features: self.channel_type_features.clone(),
-			channel_value_satoshis: self.channel_value_satoshis,
-		})
-	}
 }
 
 impl ChannelTransactionParameters {
