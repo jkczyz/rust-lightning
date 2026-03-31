@@ -22,17 +22,19 @@ use alloc::collections::BTreeSet;
 use crate::io;
 use crate::ln::channelmanager::PaymentId;
 use crate::ln::inbound_payment::ExpandedKey;
+use crate::ln::msgs::DecodeError;
 use crate::offers::invoice::{
 	Bolt12Invoice, INVOICE_AMOUNT_TYPE, INVOICE_CREATED_AT_TYPE, INVOICE_FEATURES_TYPE,
 	INVOICE_NODE_ID_TYPE, INVOICE_PAYMENT_HASH_TYPE, SIGNATURE_TAG,
 };
 use crate::offers::invoice_request::INVOICE_REQUEST_PAYER_ID_TYPE;
 use crate::offers::merkle::{
-	self, SelectiveDisclosure, SelectiveDisclosureError, TaggedHash, TlvStream, SIGNATURE_TYPES,
+	self, SelectiveDisclosure, SelectiveDisclosureError, TaggedHash, TlvRecord, TlvStream,
+	SIGNATURE_TYPES,
 };
 use crate::offers::nonce::Nonce;
 use crate::offers::offer::{OFFER_DESCRIPTION_TYPE, OFFER_ISSUER_TYPE};
-use crate::offers::parse::Bech32Encode;
+use crate::offers::parse::{Bech32Encode, Bolt12ParseError, Bolt12SemanticError};
 use crate::offers::payer::PAYER_METADATA_TYPE;
 use crate::types::payment::{PaymentHash, PaymentPreimage};
 use crate::util::ser::{
@@ -89,7 +91,7 @@ pub enum PayerProofError {
 	SignatureTypeNotAllowed,
 
 	/// Error decoding the payer proof.
-	DecodeError(crate::ln::msgs::DecodeError),
+	DecodeError(DecodeError),
 }
 
 impl From<SelectiveDisclosureError> for PayerProofError {
@@ -98,8 +100,8 @@ impl From<SelectiveDisclosureError> for PayerProofError {
 	}
 }
 
-impl From<crate::ln::msgs::DecodeError> for PayerProofError {
-	fn from(e: crate::ln::msgs::DecodeError) -> Self {
+impl From<DecodeError> for PayerProofError {
+	fn from(e: DecodeError) -> Self {
 		PayerProofError::DecodeError(e)
 	}
 }
@@ -361,9 +363,8 @@ impl UnsignedPayerProof<'_> {
 			.verify_schnorr(&payer_signature, &message, &self.payer_id.into())
 			.map_err(|_| PayerProofError::InvalidPayerSignature)?;
 
-		let bytes = self
-			.serialize_payer_proof(&payer_signature, note)
-			.expect("Vec write should not fail");
+		let bytes =
+			self.serialize_payer_proof(&payer_signature, note).expect("Vec write should not fail");
 
 		Ok(PayerProof {
 			bytes,
@@ -527,8 +528,7 @@ impl AsRef<[u8]> for PayerProof {
 /// `TlvStream::new()` assumes well-formed input and panics on malformed BigSize
 /// values or out-of-bounds lengths. This function validates the framing first,
 /// returning an error instead of panicking on untrusted input.
-fn validate_tlv_framing(bytes: &[u8]) -> Result<(), crate::ln::msgs::DecodeError> {
-	use crate::ln::msgs::DecodeError;
+fn validate_tlv_framing(bytes: &[u8]) -> Result<(), DecodeError> {
 	let mut cursor = io::Cursor::new(bytes);
 	while (cursor.position() as usize) < bytes.len() {
 		let _type: BigSize = Readable::read(&mut cursor).map_err(|_| DecodeError::InvalidValue)?;
@@ -544,11 +544,7 @@ fn validate_tlv_framing(bytes: &[u8]) -> Result<(), crate::ln::msgs::DecodeError
 }
 
 impl DisclosedFields {
-	fn update(
-		&mut self, record: &crate::offers::merkle::TlvRecord<'_>,
-	) -> Result<(), crate::ln::msgs::DecodeError> {
-		use crate::ln::msgs::DecodeError;
-
+	fn update(&mut self, record: &TlvRecord<'_>) -> Result<(), DecodeError> {
 		match record.r#type {
 			OFFER_DESCRIPTION_TYPE => {
 				self.offer_description = Some(
@@ -578,8 +574,8 @@ impl DisclosedFields {
 	}
 
 	fn from_records<'a>(
-		records: impl core::iter::Iterator<Item = crate::offers::merkle::TlvRecord<'a>>,
-	) -> Result<Self, crate::ln::msgs::DecodeError> {
+		records: impl core::iter::Iterator<Item = TlvRecord<'a>>,
+	) -> Result<Self, DecodeError> {
 		let mut disclosed_fields = DisclosedFields::default();
 		for record in records {
 			disclosed_fields.update(&record)?;
@@ -597,12 +593,9 @@ impl DisclosedFields {
 // of known fields with standard `Readable`/`Writeable` encodings, so it cannot
 // express the passthrough-or-parse logic required here.
 impl TryFrom<Vec<u8>> for PayerProof {
-	type Error = crate::offers::parse::Bolt12ParseError;
+	type Error = Bolt12ParseError;
 
 	fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-		use crate::ln::msgs::DecodeError;
-		use crate::offers::parse::Bolt12ParseError;
-
 		// Validate TLV framing before passing to TlvStream, which assumes
 		// well-formed input and panics on malformed BigSize or out-of-bounds
 		// lengths. This mirrors the validation that ParsedMessage / CursorReadable
@@ -715,22 +708,17 @@ impl TryFrom<Vec<u8>> for PayerProof {
 		}
 
 		let payer_id = payer_id.ok_or(Bolt12ParseError::InvalidSemantics(
-			crate::offers::parse::Bolt12SemanticError::MissingPayerSigningPubkey,
+			Bolt12SemanticError::MissingPayerSigningPubkey,
 		))?;
-		let payment_hash = payment_hash.ok_or(Bolt12ParseError::InvalidSemantics(
-			crate::offers::parse::Bolt12SemanticError::MissingPaymentHash,
-		))?;
-		let issuer_signing_pubkey =
-			issuer_signing_pubkey.ok_or(Bolt12ParseError::InvalidSemantics(
-				crate::offers::parse::Bolt12SemanticError::MissingSigningPubkey,
-			))?;
-		let invoice_signature = invoice_signature.ok_or(Bolt12ParseError::InvalidSemantics(
-			crate::offers::parse::Bolt12SemanticError::MissingSignature,
-		))?;
+		let payment_hash = payment_hash
+			.ok_or(Bolt12ParseError::InvalidSemantics(Bolt12SemanticError::MissingPaymentHash))?;
+		let issuer_signing_pubkey = issuer_signing_pubkey
+			.ok_or(Bolt12ParseError::InvalidSemantics(Bolt12SemanticError::MissingSigningPubkey))?;
+		let invoice_signature = invoice_signature
+			.ok_or(Bolt12ParseError::InvalidSemantics(Bolt12SemanticError::MissingSignature))?;
 		let preimage = preimage.ok_or(Bolt12ParseError::Decode(DecodeError::InvalidValue))?;
-		let payer_signature = payer_signature.ok_or(Bolt12ParseError::InvalidSemantics(
-			crate::offers::parse::Bolt12SemanticError::MissingSignature,
-		))?;
+		let payer_signature = payer_signature
+			.ok_or(Bolt12ParseError::InvalidSemantics(Bolt12SemanticError::MissingSignature))?;
 
 		validate_omitted_markers_for_parsing(&omitted_markers, &included_types)
 			.map_err(Bolt12ParseError::Decode)?;
@@ -798,7 +786,7 @@ impl TryFrom<Vec<u8>> for PayerProof {
 ///   type.
 fn validate_omitted_markers_for_parsing(
 	omitted_markers: &[u64], included_types: &BTreeSet<u64>,
-) -> Result<(), crate::ln::msgs::DecodeError> {
+) -> Result<(), DecodeError> {
 	let mut inc_iter = included_types.iter().copied().peekable();
 	// After implicit TLV0 (marker 0), the first minimized marker would be 1
 	let mut expected_next: u64 = 1;
@@ -807,22 +795,22 @@ fn validate_omitted_markers_for_parsing(
 	for &marker in omitted_markers {
 		// MUST NOT contain 0
 		if marker == 0 {
-			return Err(crate::ln::msgs::DecodeError::InvalidValue);
+			return Err(DecodeError::InvalidValue);
 		}
 
 		// MUST NOT contain signature TLV types
 		if SIGNATURE_TYPES.contains(&marker) {
-			return Err(crate::ln::msgs::DecodeError::InvalidValue);
+			return Err(DecodeError::InvalidValue);
 		}
 
 		// MUST be strictly ascending
 		if marker <= prev {
-			return Err(crate::ln::msgs::DecodeError::InvalidValue);
+			return Err(DecodeError::InvalidValue);
 		}
 
 		// MUST NOT contain included TLV types
 		if included_types.contains(&marker) {
-			return Err(crate::ln::msgs::DecodeError::InvalidValue);
+			return Err(DecodeError::InvalidValue);
 		}
 
 		// Validate minimization: marker must equal expected_next (continuation
@@ -836,11 +824,11 @@ fn validate_omitted_markers_for_parsing(
 					break;
 				}
 				if inc_type >= marker {
-					return Err(crate::ln::msgs::DecodeError::InvalidValue);
+					return Err(DecodeError::InvalidValue);
 				}
 			}
 			if !found {
-				return Err(crate::ln::msgs::DecodeError::InvalidValue);
+				return Err(DecodeError::InvalidValue);
 			}
 		}
 
@@ -852,7 +840,7 @@ fn validate_omitted_markers_for_parsing(
 }
 
 impl core::str::FromStr for PayerProof {
-	type Err = crate::offers::parse::Bolt12ParseError;
+	type Err = Bolt12ParseError;
 
 	fn from_str(s: &str) -> Result<Self, <Self as core::str::FromStr>::Err> {
 		Self::from_bech32_str(s)
@@ -1236,7 +1224,7 @@ mod tests {
 		let included: BTreeSet<u64> = [10, 30].iter().copied().collect();
 
 		let result = validate_omitted_markers_for_parsing(&omitted, &included);
-		assert!(matches!(result, Err(crate::ln::msgs::DecodeError::InvalidValue)));
+		assert!(matches!(result, Err(DecodeError::InvalidValue)));
 	}
 
 	/// Test that a minimized trailing run is accepted.
