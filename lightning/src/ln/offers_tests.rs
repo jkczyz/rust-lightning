@@ -2897,7 +2897,7 @@ fn creates_payer_proof_with_note_and_selective_disclosure() {
 		.include_offer_issuer()
 		.include_invoice_amount()
 		.include_invoice_created_at()
-		.build_and_sign(Some("Paid for coffee"))
+		.build_and_sign(Some("Paid for coffee".into()))
 		.unwrap();
 	assert_eq!(proof_with_note.payer_note().map(|p| p.0), Some("Paid for coffee"));
 

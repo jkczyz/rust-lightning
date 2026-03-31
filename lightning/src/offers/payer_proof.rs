@@ -194,15 +194,11 @@ impl<'a> PayerProofBuilder<'a, ExplicitSigningKey> {
 		Ok(Self { invoice, preimage, included_types, signing_strategy: ExplicitSigningKey {} })
 	}
 
-	/// Builds a signed [`PayerProof`] using the provided signing function.
-	///
-	/// Use this when you have direct access to the payer's signing key.
-	pub fn build<F>(self, sign_fn: F, note: Option<&str>) -> Result<PayerProof, PayerProofError>
-	where
-		F: FnOnce(&Message) -> Result<Signature, ()>,
-	{
-		let unsigned = self.build_unsigned()?;
-		unsigned.sign(sign_fn, note)
+	/// Builds an [`UnsignedPayerProof`] that can be signed with [`UnsignedPayerProof::sign`].
+	pub fn build(
+		self, payer_note: Option<String>,
+	) -> Result<UnsignedPayerProof<'a>, PayerProofError> {
+		self.build_unsigned(payer_note)
 	}
 }
 
@@ -246,11 +242,11 @@ impl<'a> PayerProofBuilder<'a, DerivedSigningKey> {
 	}
 
 	/// Builds and signs a [`PayerProof`] using the keypair derived at construction time.
-	pub fn build_and_sign(self, note: Option<&str>) -> Result<PayerProof, PayerProofError> {
+	pub fn build_and_sign(self, payer_note: Option<String>) -> Result<PayerProof, PayerProofError> {
 		let secp_ctx = Secp256k1::signing_only();
 		let keys = self.signing_strategy.0;
-		let unsigned = self.build_unsigned()?;
-		unsigned.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &keys)), note)
+		let unsigned = self.build_unsigned(payer_note)?;
+		unsigned.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &keys)))
 	}
 }
 
@@ -295,7 +291,9 @@ impl<'a, S: SigningStrategy> PayerProofBuilder<'a, S> {
 		self
 	}
 
-	fn build_unsigned(self) -> Result<UnsignedPayerProof<'a>, PayerProofError> {
+	fn build_unsigned(
+		self, payer_note: Option<String>,
+	) -> Result<UnsignedPayerProof<'a>, PayerProofError> {
 		let invoice_bytes = self.invoice.invoice_bytes();
 		let disclosed_fields =
 			DisclosedFields::from_records(TlvStream::new(invoice_bytes).filter(|r| {
@@ -319,12 +317,13 @@ impl<'a, S: SigningStrategy> PayerProofBuilder<'a, S> {
 			included_types: self.included_types,
 			disclosed_fields,
 			disclosure,
+			payer_note,
 		})
 	}
 }
 
 /// An unsigned [`PayerProof`] ready for signing.
-struct UnsignedPayerProof<'a> {
+pub struct UnsignedPayerProof<'a> {
 	invoice_signature: Signature,
 	preimage: PaymentPreimage,
 	payer_id: PublicKey,
@@ -334,6 +333,7 @@ struct UnsignedPayerProof<'a> {
 	included_types: BTreeSet<u64>,
 	disclosed_fields: DisclosedFields,
 	disclosure: SelectiveDisclosure,
+	payer_note: Option<String>,
 }
 
 /// Compound value for the payer signature TLV (type 250): a schnorr signature
@@ -351,11 +351,15 @@ impl Writeable for PayerSignatureWithNote<'_> {
 }
 
 impl UnsignedPayerProof<'_> {
-	fn sign<F>(self, sign_fn: F, note: Option<&str>) -> Result<PayerProof, PayerProofError>
+	/// Signs the [`UnsignedPayerProof`] using the given function.
+	pub fn sign<F>(self, sign_fn: F) -> Result<PayerProof, PayerProofError>
 	where
 		F: FnOnce(&Message) -> Result<Signature, ()>,
 	{
-		let message = Self::compute_payer_signature_message(note, &self.disclosure.merkle_root);
+		let message = Self::compute_payer_signature_message(
+			self.payer_note.as_deref(),
+			&self.disclosure.merkle_root,
+		);
 		let payer_signature = sign_fn(&message).map_err(|_| PayerProofError::SigningError)?;
 
 		let secp_ctx = Secp256k1::verification_only();
@@ -364,7 +368,7 @@ impl UnsignedPayerProof<'_> {
 			.map_err(|_| PayerProofError::InvalidPayerSignature)?;
 
 		let bytes =
-			self.serialize_payer_proof(&payer_signature, note).expect("Vec write should not fail");
+			self.serialize_payer_proof(&payer_signature).expect("Vec write should not fail");
 
 		Ok(PayerProof {
 			bytes,
@@ -375,7 +379,7 @@ impl UnsignedPayerProof<'_> {
 				preimage: self.preimage,
 				invoice_signature: self.invoice_signature,
 				payer_signature,
-				payer_note: note.map(String::from),
+				payer_note: self.payer_note,
 				disclosed_fields: self.disclosed_fields,
 			},
 			merkle_root: self.disclosure.merkle_root,
@@ -402,9 +406,7 @@ impl UnsignedPayerProof<'_> {
 		Message::from_digest(*final_digest.as_byte_array())
 	}
 
-	fn serialize_payer_proof(
-		&self, payer_signature: &Signature, note: Option<&str>,
-	) -> Result<Vec<u8>, io::Error> {
+	fn serialize_payer_proof(&self, payer_signature: &Signature) -> Result<Vec<u8>, io::Error> {
 		const PAYER_PROOF_ALLOCATION_SIZE: usize = 512;
 		let mut bytes = Vec::with_capacity(PAYER_PROOF_ALLOCATION_SIZE);
 
@@ -418,7 +420,7 @@ impl UnsignedPayerProof<'_> {
 			bytes.extend_from_slice(record.record_bytes);
 		}
 
-		let note_bytes = note.map(|n| n.as_bytes()).unwrap_or(&[]);
+		let note_bytes = self.payer_note.as_deref().map(|n| n.as_bytes()).unwrap_or(&[]);
 		let payer_sig = PayerSignatureWithNote { signature: payer_signature, note_bytes };
 		let omitted_markers = if self.disclosure.omitted_markers.is_empty() {
 			None
@@ -942,10 +944,11 @@ mod tests {
 			included_types,
 			disclosed_fields,
 			disclosure,
+			payer_note: None,
 		};
 
 		unsigned
-			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)), None)
+			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)))
 			.unwrap()
 	}
 
@@ -998,10 +1001,11 @@ mod tests {
 			included_types,
 			disclosed_fields,
 			disclosure,
+			payer_note: None,
 		};
 
 		unsigned
-			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)), None)
+			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)))
 			.unwrap()
 	}
 
@@ -1070,10 +1074,11 @@ mod tests {
 			included_types,
 			disclosed_fields,
 			disclosure,
+			payer_note: None,
 		};
 
 		unsigned
-			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)), None)
+			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)))
 			.unwrap()
 	}
 
@@ -1551,7 +1556,9 @@ mod tests {
 		let proof = invoice
 			.payer_proof_builder(preimage)
 			.unwrap()
-			.build(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)), None)
+			.build(None)
+			.unwrap()
+			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)))
 			.unwrap();
 		let parsed = PayerProof::try_from(proof.bytes().to_vec()).unwrap();
 
@@ -1597,7 +1604,7 @@ mod tests {
 		let proof = invoice
 			.payer_proof_builder_derived(preimage, &expanded_key, nonce, payment_id, &secp_ctx)
 			.unwrap()
-			.build_and_sign(Some("refund"))
+			.build_and_sign(Some("refund".into()))
 			.unwrap();
 		let parsed = PayerProof::try_from(proof.bytes().to_vec()).unwrap();
 
