@@ -29,8 +29,8 @@ use crate::offers::invoice::{
 };
 use crate::offers::invoice_request::INVOICE_REQUEST_PAYER_ID_TYPE;
 use crate::offers::merkle::{
-	self, SelectiveDisclosure, SelectiveDisclosureError, TaggedHash, TlvRecord, TlvStream,
-	SIGNATURE_TYPES,
+	self, SelectiveDisclosure, SelectiveDisclosureError, SignError, TaggedHash, TlvRecord,
+	TlvStream, SIGNATURE_TYPES,
 };
 use crate::offers::nonce::Nonce;
 use crate::offers::offer::{OFFER_DESCRIPTION_TYPE, OFFER_ISSUER_TYPE};
@@ -47,7 +47,7 @@ use bitcoin::hashes::{sha256, Hash, HashEngine};
 use bitcoin::secp256k1;
 use bitcoin::secp256k1::constants::SCHNORR_SIGNATURE_SIZE;
 use bitcoin::secp256k1::schnorr::Signature;
-use bitcoin::secp256k1::{Keypair, Message, PublicKey, Secp256k1};
+use bitcoin::secp256k1::{Keypair, PublicKey, Secp256k1};
 
 use core::convert::TryFrom;
 use core::time::Duration;
@@ -246,7 +246,9 @@ impl<'a> PayerProofBuilder<'a, DerivedSigningKey> {
 		let secp_ctx = Secp256k1::signing_only();
 		let keys = self.signing_strategy.0;
 		let unsigned = self.build_unsigned(payer_note)?;
-		unsigned.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &keys)))
+		unsigned.sign(|proof: &UnsignedPayerProof| {
+			Ok(secp_ctx.sign_schnorr_no_aux_rand(proof.as_ref().as_digest(), &keys))
+		})
 	}
 }
 
@@ -307,6 +309,8 @@ impl<'a, S: SigningStrategy> PayerProofBuilder<'a, S> {
 
 		let invoice_signature = self.invoice.signature();
 
+		let tagged_hash = payer_signature_hash(payer_note.as_deref(), &disclosure.merkle_root);
+
 		Ok(UnsignedPayerProof {
 			invoice_signature,
 			preimage: self.preimage,
@@ -318,8 +322,24 @@ impl<'a, S: SigningStrategy> PayerProofBuilder<'a, S> {
 			disclosed_fields,
 			disclosure,
 			payer_note,
+			tagged_hash,
 		})
 	}
+}
+
+/// Computes the [`TaggedHash`] for a payer proof signature.
+///
+/// The payer signature is computed over `H(tag||tag||H(note||merkle_root))`. The inner
+/// hash `H(note||merkle_root)` serves as the "merkle root" for [`TaggedHash::from_merkle_root`].
+fn payer_signature_hash(note: Option<&str>, merkle_root: &sha256::Hash) -> TaggedHash {
+	let mut engine = sha256::Hash::engine();
+	if let Some(n) = note {
+		engine.input(n.as_bytes());
+	}
+	engine.input(merkle_root.as_ref());
+	let inner_hash = sha256::Hash::from_engine(engine);
+
+	TaggedHash::from_merkle_root(PAYER_SIGNATURE_TAG, inner_hash)
 }
 
 /// An unsigned [`PayerProof`] ready for signing.
@@ -334,6 +354,37 @@ pub struct UnsignedPayerProof<'a> {
 	disclosed_fields: DisclosedFields,
 	disclosure: SelectiveDisclosure,
 	payer_note: Option<String>,
+	tagged_hash: TaggedHash,
+}
+
+impl AsRef<TaggedHash> for UnsignedPayerProof<'_> {
+	fn as_ref(&self) -> &TaggedHash {
+		&self.tagged_hash
+	}
+}
+
+/// A function for signing an [`UnsignedPayerProof`].
+pub trait SignPayerProofFn {
+	/// Signs a [`TaggedHash`] computed over the payer note and the invoice's merkle root.
+	fn sign_payer_proof(&self, message: &UnsignedPayerProof) -> Result<Signature, ()>;
+}
+
+impl<F> SignPayerProofFn for F
+where
+	F: Fn(&UnsignedPayerProof) -> Result<Signature, ()>,
+{
+	fn sign_payer_proof(&self, message: &UnsignedPayerProof) -> Result<Signature, ()> {
+		self(message)
+	}
+}
+
+impl<F> merkle::SignFn<UnsignedPayerProof<'_>> for F
+where
+	F: SignPayerProofFn,
+{
+	fn sign(&self, message: &UnsignedPayerProof) -> Result<Signature, ()> {
+		self.sign_payer_proof(message)
+	}
 }
 
 /// Compound value for the payer signature TLV (type 250): a schnorr signature
@@ -352,20 +403,12 @@ impl Writeable for PayerSignatureWithNote<'_> {
 
 impl UnsignedPayerProof<'_> {
 	/// Signs the [`UnsignedPayerProof`] using the given function.
-	pub fn sign<F>(self, sign_fn: F) -> Result<PayerProof, PayerProofError>
-	where
-		F: FnOnce(&Message) -> Result<Signature, ()>,
-	{
-		let message = Self::compute_payer_signature_message(
-			self.payer_note.as_deref(),
-			&self.disclosure.merkle_root,
-		);
-		let payer_signature = sign_fn(&message).map_err(|_| PayerProofError::SigningError)?;
-
-		let secp_ctx = Secp256k1::verification_only();
-		secp_ctx
-			.verify_schnorr(&payer_signature, &message, &self.payer_id.into())
-			.map_err(|_| PayerProofError::InvalidPayerSignature)?;
+	pub fn sign<F: SignPayerProofFn>(self, sign: F) -> Result<PayerProof, PayerProofError> {
+		let pubkey = self.payer_id;
+		let payer_signature = merkle::sign_message(sign, &self, pubkey).map_err(|e| match e {
+			SignError::Signing => PayerProofError::SigningError,
+			SignError::Verification(_) => PayerProofError::InvalidPayerSignature,
+		})?;
 
 		let bytes =
 			self.serialize_payer_proof(&payer_signature).expect("Vec write should not fail");
@@ -384,26 +427,6 @@ impl UnsignedPayerProof<'_> {
 			},
 			merkle_root: self.disclosure.merkle_root,
 		})
-	}
-
-	/// Compute the payer signature message per BOLT 12 signature calculation.
-	fn compute_payer_signature_message(note: Option<&str>, merkle_root: &sha256::Hash) -> Message {
-		let mut inner_hasher = sha256::Hash::engine();
-		if let Some(n) = note {
-			inner_hasher.input(n.as_bytes());
-		}
-		inner_hasher.input(merkle_root.as_ref());
-		let inner_msg = sha256::Hash::from_engine(inner_hasher);
-
-		let tag_hash = sha256::Hash::hash(PAYER_SIGNATURE_TAG.as_bytes());
-
-		let mut final_hasher = sha256::Hash::engine();
-		final_hasher.input(tag_hash.as_ref());
-		final_hasher.input(tag_hash.as_ref());
-		final_hasher.input(inner_msg.as_ref());
-		let final_digest = sha256::Hash::from_engine(final_hasher);
-
-		Message::from_digest(*final_digest.as_byte_array())
 	}
 
 	fn serialize_payer_proof(&self, payer_signature: &Signature) -> Result<Vec<u8>, io::Error> {
@@ -749,13 +772,8 @@ impl TryFrom<Vec<u8>> for PayerProof {
 			.map_err(|_| Bolt12ParseError::Decode(DecodeError::InvalidValue))?;
 
 		// Verify the payer signature.
-		let message = UnsignedPayerProof::compute_payer_signature_message(
-			payer_note.as_deref(),
-			&merkle_root,
-		);
-		let secp_ctx = Secp256k1::verification_only();
-		secp_ctx
-			.verify_schnorr(&payer_signature, &message, &payer_id.into())
+		let payer_tagged_hash = payer_signature_hash(payer_note.as_deref(), &merkle_root);
+		merkle::verify_signature(&payer_signature, &payer_tagged_hash, payer_id)
 			.map_err(|_| Bolt12ParseError::Decode(DecodeError::InvalidValue))?;
 
 		Ok(PayerProof {
@@ -943,12 +961,15 @@ mod tests {
 			invoice_bytes: &invoice_bytes,
 			included_types,
 			disclosed_fields,
+			tagged_hash: payer_signature_hash(None, &disclosure.merkle_root),
 			disclosure,
 			payer_note: None,
 		};
 
 		unsigned
-			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)))
+			.sign(|proof: &UnsignedPayerProof| {
+				Ok(secp_ctx.sign_schnorr_no_aux_rand(proof.as_ref().as_digest(), &payer_keys))
+			})
 			.unwrap()
 	}
 
@@ -1000,12 +1021,15 @@ mod tests {
 			invoice_bytes: &invoice_bytes,
 			included_types,
 			disclosed_fields,
+			tagged_hash: payer_signature_hash(None, &disclosure.merkle_root),
 			disclosure,
 			payer_note: None,
 		};
 
 		unsigned
-			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)))
+			.sign(|proof: &UnsignedPayerProof| {
+				Ok(secp_ctx.sign_schnorr_no_aux_rand(proof.as_ref().as_digest(), &payer_keys))
+			})
 			.unwrap()
 	}
 
@@ -1073,12 +1097,15 @@ mod tests {
 			invoice_bytes: &invoice_bytes,
 			included_types,
 			disclosed_fields,
+			tagged_hash: payer_signature_hash(None, &disclosure.merkle_root),
 			disclosure,
 			payer_note: None,
 		};
 
 		unsigned
-			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)))
+			.sign(|proof: &UnsignedPayerProof| {
+				Ok(secp_ctx.sign_schnorr_no_aux_rand(proof.as_ref().as_digest(), &payer_keys))
+			})
 			.unwrap()
 	}
 
@@ -1558,7 +1585,9 @@ mod tests {
 			.unwrap()
 			.build(None)
 			.unwrap()
-			.sign(|message| Ok(secp_ctx.sign_schnorr_no_aux_rand(message, &payer_keys)))
+			.sign(|proof: &UnsignedPayerProof| {
+				Ok(secp_ctx.sign_schnorr_no_aux_rand(proof.as_ref().as_digest(), &payer_keys))
+			})
 			.unwrap();
 		let parsed = PayerProof::try_from(proof.bytes().to_vec()).unwrap();
 
