@@ -36,7 +36,8 @@ use crate::offers::parse::Bech32Encode;
 use crate::offers::payer::PAYER_METADATA_TYPE;
 use crate::types::payment::{PaymentHash, PaymentPreimage};
 use crate::util::ser::{
-	BigSize, HighZeroBytesDroppedBigSize, LengthReadable, Readable, WithoutLength, Writeable,
+	BigSize, HighZeroBytesDroppedBigSize, IterableOwned, LengthReadable, Readable, WithoutLength,
+	Writeable, Writer,
 };
 use lightning_types::string::PrintableString;
 
@@ -333,6 +334,20 @@ struct UnsignedPayerProof<'a> {
 	disclosure: SelectiveDisclosure,
 }
 
+/// Compound value for the payer signature TLV (type 250): a schnorr signature
+/// followed by optional UTF-8 note bytes.
+struct PayerSignatureWithNote<'a> {
+	signature: &'a Signature,
+	note_bytes: &'a [u8],
+}
+
+impl Writeable for PayerSignatureWithNote<'_> {
+	fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
+		self.signature.write(w)?;
+		w.write_all(self.note_bytes)
+	}
+}
+
 impl UnsignedPayerProof<'_> {
 	fn sign<F>(self, sign_fn: F, note: Option<&str>) -> Result<PayerProof, PayerProofError>
 	where
@@ -346,7 +361,9 @@ impl UnsignedPayerProof<'_> {
 			.verify_schnorr(&payer_signature, &message, &self.payer_id.into())
 			.map_err(|_| PayerProofError::InvalidPayerSignature)?;
 
-		let bytes = self.serialize_payer_proof(&payer_signature, note);
+		let bytes = self
+			.serialize_payer_proof(&payer_signature, note)
+			.expect("Vec write should not fail");
 
 		Ok(PayerProof {
 			bytes,
@@ -384,7 +401,9 @@ impl UnsignedPayerProof<'_> {
 		Message::from_digest(*final_digest.as_byte_array())
 	}
 
-	fn serialize_payer_proof(&self, payer_signature: &Signature, note: Option<&str>) -> Vec<u8> {
+	fn serialize_payer_proof(
+		&self, payer_signature: &Signature, note: Option<&str>,
+	) -> Result<Vec<u8>, io::Error> {
 		const PAYER_PROOF_ALLOCATION_SIZE: usize = 512;
 		let mut bytes = Vec::with_capacity(PAYER_PROOF_ALLOCATION_SIZE);
 
@@ -398,58 +417,22 @@ impl UnsignedPayerProof<'_> {
 			bytes.extend_from_slice(record.record_bytes);
 		}
 
-		BigSize(TLV_SIGNATURE).write(&mut bytes).expect("Vec write should not fail");
-		BigSize(self.invoice_signature.serialized_length() as u64)
-			.write(&mut bytes)
-			.expect("Vec write should not fail");
-		self.invoice_signature.write(&mut bytes).expect("Vec write should not fail");
-
-		BigSize(TLV_PREIMAGE).write(&mut bytes).expect("Vec write should not fail");
-		BigSize(self.preimage.serialized_length() as u64)
-			.write(&mut bytes)
-			.expect("Vec write should not fail");
-		self.preimage.write(&mut bytes).expect("Vec write should not fail");
-
-		if !self.disclosure.omitted_markers.is_empty() {
-			let omitted_len: u64 = self
-				.disclosure
-				.omitted_markers
-				.iter()
-				.map(|m| BigSize(*m).serialized_length() as u64)
-				.sum();
-			BigSize(TLV_OMITTED_TLVS).write(&mut bytes).expect("Vec write should not fail");
-			BigSize(omitted_len).write(&mut bytes).expect("Vec write should not fail");
-			for marker in &self.disclosure.omitted_markers {
-				BigSize(*marker).write(&mut bytes).expect("Vec write should not fail");
-			}
-		}
-
-		if !self.disclosure.missing_hashes.is_empty() {
-			BigSize(TLV_MISSING_HASHES).write(&mut bytes).expect("Vec write should not fail");
-			BigSize(WithoutLength(&self.disclosure.missing_hashes).serialized_length() as u64)
-				.write(&mut bytes)
-				.expect("Vec write should not fail");
-			WithoutLength(&self.disclosure.missing_hashes)
-				.write(&mut bytes)
-				.expect("Vec write should not fail");
-		}
-
-		if !self.disclosure.leaf_hashes.is_empty() {
-			BigSize(TLV_LEAF_HASHES).write(&mut bytes).expect("Vec write should not fail");
-			BigSize(WithoutLength(&self.disclosure.leaf_hashes).serialized_length() as u64)
-				.write(&mut bytes)
-				.expect("Vec write should not fail");
-			WithoutLength(&self.disclosure.leaf_hashes)
-				.write(&mut bytes)
-				.expect("Vec write should not fail");
-		}
-
 		let note_bytes = note.map(|n| n.as_bytes()).unwrap_or(&[]);
-		let payer_sig_len = payer_signature.serialized_length() + note_bytes.len();
-		BigSize(TLV_PAYER_SIGNATURE).write(&mut bytes).expect("Vec write should not fail");
-		BigSize(payer_sig_len as u64).write(&mut bytes).expect("Vec write should not fail");
-		payer_signature.write(&mut bytes).expect("Vec write should not fail");
-		bytes.extend_from_slice(note_bytes);
+		let payer_sig = PayerSignatureWithNote { signature: payer_signature, note_bytes };
+		let omitted_markers = if self.disclosure.omitted_markers.is_empty() {
+			None
+		} else {
+			Some(IterableOwned(self.disclosure.omitted_markers.iter().map(|m| BigSize(*m))))
+		};
+
+		encode_tlv_stream!(&mut bytes, {
+			(TLV_SIGNATURE, &self.invoice_signature, required),
+			(TLV_PREIMAGE, &self.preimage, required),
+			(TLV_OMITTED_TLVS, omitted_markers, option),
+			(TLV_MISSING_HASHES, &self.disclosure.missing_hashes, optional_vec),
+			(TLV_LEAF_HASHES, &self.disclosure.leaf_hashes, optional_vec),
+			(TLV_PAYER_SIGNATURE, &payer_sig, required),
+		});
 
 		for record in TlvStream::new(&self.invoice_bytes)
 			.range((*SIGNATURE_TYPES.end() + 1)..)
@@ -458,7 +441,7 @@ impl UnsignedPayerProof<'_> {
 			bytes.extend_from_slice(record.record_bytes);
 		}
 
-		bytes
+		Ok(bytes)
 	}
 }
 
