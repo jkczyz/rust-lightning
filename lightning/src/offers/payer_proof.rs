@@ -296,7 +296,7 @@ impl<'a, S: SigningStrategy> PayerProofBuilder<'a, S> {
 	fn build_unsigned(self) -> Result<UnsignedPayerProof<'a>, PayerProofError> {
 		let invoice_bytes = self.invoice.invoice_bytes();
 		let disclosed_fields =
-			extract_disclosed_fields(TlvStream::new(invoice_bytes).filter(|r| {
+			DisclosedFields::from_records(TlvStream::new(invoice_bytes).filter(|r| {
 				self.included_types.contains(&r.r#type) && !SIGNATURE_TYPES.contains(&r.r#type)
 			}))?;
 
@@ -543,47 +543,49 @@ fn validate_tlv_framing(bytes: &[u8]) -> Result<(), crate::ln::msgs::DecodeError
 	Ok(())
 }
 
-fn update_disclosed_fields(
-	record: &crate::offers::merkle::TlvRecord<'_>, disclosed_fields: &mut DisclosedFields,
-) -> Result<(), crate::ln::msgs::DecodeError> {
-	use crate::ln::msgs::DecodeError;
+impl DisclosedFields {
+	fn update(
+		&mut self, record: &crate::offers::merkle::TlvRecord<'_>,
+	) -> Result<(), crate::ln::msgs::DecodeError> {
+		use crate::ln::msgs::DecodeError;
 
-	match record.r#type {
-		OFFER_DESCRIPTION_TYPE => {
-			disclosed_fields.offer_description = Some(
-				String::from_utf8(record.value_bytes.to_vec())
-					.map_err(|_| DecodeError::InvalidValue)?,
-			);
-		},
-		OFFER_ISSUER_TYPE => {
-			disclosed_fields.offer_issuer = Some(
-				String::from_utf8(record.value_bytes.to_vec())
-					.map_err(|_| DecodeError::InvalidValue)?,
-			);
-		},
-		INVOICE_CREATED_AT_TYPE => {
-			disclosed_fields.invoice_created_at = Some(Duration::from_secs(
-				record.read_value::<HighZeroBytesDroppedBigSize<u64>>()?.0,
-			));
-		},
-		INVOICE_AMOUNT_TYPE => {
-			disclosed_fields.invoice_amount_msats =
-				Some(record.read_value::<HighZeroBytesDroppedBigSize<u64>>()?.0);
-		},
-		_ => {},
+		match record.r#type {
+			OFFER_DESCRIPTION_TYPE => {
+				self.offer_description = Some(
+					String::from_utf8(record.value_bytes.to_vec())
+						.map_err(|_| DecodeError::InvalidValue)?,
+				);
+			},
+			OFFER_ISSUER_TYPE => {
+				self.offer_issuer = Some(
+					String::from_utf8(record.value_bytes.to_vec())
+						.map_err(|_| DecodeError::InvalidValue)?,
+				);
+			},
+			INVOICE_CREATED_AT_TYPE => {
+				self.invoice_created_at = Some(Duration::from_secs(
+					record.read_value::<HighZeroBytesDroppedBigSize<u64>>()?.0,
+				));
+			},
+			INVOICE_AMOUNT_TYPE => {
+				self.invoice_amount_msats =
+					Some(record.read_value::<HighZeroBytesDroppedBigSize<u64>>()?.0);
+			},
+			_ => {},
+		}
+
+		Ok(())
 	}
 
-	Ok(())
-}
-
-fn extract_disclosed_fields<'a>(
-	records: impl core::iter::Iterator<Item = crate::offers::merkle::TlvRecord<'a>>,
-) -> Result<DisclosedFields, crate::ln::msgs::DecodeError> {
-	let mut disclosed_fields = DisclosedFields::default();
-	for record in records {
-		update_disclosed_fields(&record, &mut disclosed_fields)?;
+	fn from_records<'a>(
+		records: impl core::iter::Iterator<Item = crate::offers::merkle::TlvRecord<'a>>,
+	) -> Result<Self, crate::ln::msgs::DecodeError> {
+		let mut disclosed_fields = DisclosedFields::default();
+		for record in records {
+			disclosed_fields.update(&record)?;
+		}
+		Ok(disclosed_fields)
 	}
-	Ok(disclosed_fields)
 }
 
 // Payer proofs use manual TLV parsing rather than `ParsedMessage` / `tlv_stream!`
@@ -636,7 +638,7 @@ impl TryFrom<Vec<u8>> for PayerProof {
 				}
 			}
 			prev_tlv_type = Some(tlv_type);
-			update_disclosed_fields(&record, &mut disclosed_fields)?;
+			disclosed_fields.update(&record)?;
 
 			match tlv_type {
 				INVOICE_REQUEST_PAYER_ID_TYPE => {
@@ -935,7 +937,7 @@ mod tests {
 		]
 		.into_iter()
 		.collect();
-		let disclosed_fields = extract_disclosed_fields(
+		let disclosed_fields = DisclosedFields::from_records(
 			TlvStream::new(&invoice_bytes).filter(|r| included_types.contains(&r.r#type)),
 		)
 		.unwrap();
@@ -990,7 +992,7 @@ mod tests {
 			[INVOICE_REQUEST_PAYER_ID_TYPE, INVOICE_PAYMENT_HASH_TYPE, INVOICE_NODE_ID_TYPE]
 				.into_iter()
 				.collect();
-		let disclosed_fields = extract_disclosed_fields(
+		let disclosed_fields = DisclosedFields::from_records(
 			TlvStream::new(&invoice_bytes).filter(|r| included_types.contains(&r.r#type)),
 		)
 		.unwrap();
@@ -1063,7 +1065,7 @@ mod tests {
 		]
 		.into_iter()
 		.collect();
-		let disclosed_fields = extract_disclosed_fields(
+		let disclosed_fields = DisclosedFields::from_records(
 			TlvStream::new(&invoice_bytes).filter(|r| included_types.contains(&r.r#type)),
 		)
 		.unwrap();
