@@ -141,9 +141,6 @@ use crate::offers::offer::{
 };
 use crate::offers::parse::{Bolt12ParseError, Bolt12SemanticError, ParsedMessage};
 use crate::offers::payer::{PayerTlvStream, PayerTlvStreamRef, PAYER_METADATA_TYPE};
-use crate::offers::payer_proof::{
-	DerivedSigningKey, ExplicitSigningKey, PayerProofBuilder, PayerProofError,
-};
 use crate::offers::refund::{
 	Refund, RefundContents, IV_BYTES_WITHOUT_METADATA as REFUND_IV_BYTES_WITHOUT_METADATA,
 	IV_BYTES_WITH_METADATA as REFUND_IV_BYTES_WITH_METADATA,
@@ -151,7 +148,6 @@ use crate::offers::refund::{
 use crate::offers::signer::{self, Metadata};
 use crate::types::features::{Bolt12InvoiceFeatures, InvoiceRequestFeatures, OfferFeatures};
 use crate::types::payment::PaymentHash;
-use crate::types::payment::PaymentPreimage;
 use crate::types::string::PrintableString;
 use crate::util::ser::{
 	CursorReadable, HighZeroBytesDroppedBigSize, Iterable, LengthLimitedRead, LengthReadable,
@@ -1040,31 +1036,6 @@ impl Bolt12Invoice {
 				(payment_id == extracted_payment_id).then(|| payment_id).ok_or(())
 			},
 		)
-	}
-
-	/// Creates a [`PayerProofBuilder`] for this invoice using the given payment preimage.
-	///
-	/// Returns an error if the preimage doesn't match the invoice's payment hash.
-	///
-	/// [`PayerProofBuilder`]: crate::offers::payer_proof::PayerProofBuilder
-	pub fn payer_proof_builder(
-		&self, preimage: PaymentPreimage,
-	) -> Result<PayerProofBuilder<'_, ExplicitSigningKey>, PayerProofError> {
-		PayerProofBuilder::new(self, preimage)
-	}
-
-	/// Creates a [`PayerProofBuilder`] with a pre-derived signing keypair.
-	///
-	/// This eagerly derives the payer signing key, failing early if derivation fails.
-	/// The `nonce` and `payment_id` are available from [`Event::PaymentSent`].
-	///
-	/// [`PayerProofBuilder`]: crate::offers::payer_proof::PayerProofBuilder
-	/// [`Event::PaymentSent`]: crate::events::Event::PaymentSent
-	pub fn payer_proof_builder_derived<T: secp256k1::Signing>(
-		&self, preimage: PaymentPreimage, expanded_key: &ExpandedKey, nonce: Nonce,
-		payment_id: PaymentId, secp_ctx: &Secp256k1<T>,
-	) -> Result<PayerProofBuilder<'_, DerivedSigningKey>, PayerProofError> {
-		PayerProofBuilder::new_derived(self, preimage, expanded_key, nonce, payment_id, secp_ctx)
 	}
 
 	/// Re-derives the payer's signing keypair for payer proof creation.

@@ -36,6 +36,7 @@ use crate::offers::nonce::Nonce;
 use crate::offers::offer::{OFFER_DESCRIPTION_TYPE, OFFER_ISSUER_TYPE};
 use crate::offers::parse::{Bech32Encode, Bolt12ParseError, Bolt12SemanticError};
 use crate::offers::payer::PAYER_METADATA_TYPE;
+use crate::offers::static_invoice::StaticInvoice;
 use crate::types::payment::{PaymentHash, PaymentPreimage};
 use crate::util::ser::{
 	BigSize, HighZeroBytesDroppedBigSize, IterableOwned, LengthReadable, Readable, WithoutLength,
@@ -55,6 +56,102 @@ use core::time::Duration;
 #[allow(unused_imports)]
 use crate::prelude::*;
 
+/// The type of BOLT 12 invoice that was paid.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Bolt12InvoiceType {
+	/// A standard BOLT 12 invoice, allowing proof of payment.
+	Bolt12Invoice(Bolt12Invoice),
+	/// A static invoice used in async payments, where proof of payment is not possible.
+	StaticInvoice(StaticInvoice),
+}
+
+impl_writeable_tlv_based_enum!(Bolt12InvoiceType,
+	{0, Bolt12Invoice} => (),
+	{2, StaticInvoice} => (),
+);
+
+/// A paid BOLT 12 invoice with the data needed to construct payer proofs.
+///
+/// For standard [`Bolt12Invoice`] payments, use [`Self::prove_payer`] or
+/// [`Self::prove_payer_derived`] to build a [`PayerProof`] that selectively discloses
+/// invoice fields to a third-party verifier.
+///
+/// For async payments (i.e., [`StaticInvoice`]), payer proofs are not supported and those
+/// methods will return [`PayerProofError::IncompatibleInvoice`].
+///
+/// Surfaced in [`Event::PaymentSent::bolt12_invoice`].
+///
+/// [`Event::PaymentSent::bolt12_invoice`]: crate::events::Event::PaymentSent::bolt12_invoice
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaidBolt12Invoice {
+	invoice: Bolt12InvoiceType,
+	preimage: PaymentPreimage,
+	nonce: Option<Nonce>,
+}
+
+impl PaidBolt12Invoice {
+	pub(crate) fn new(
+		invoice: Bolt12InvoiceType, preimage: PaymentPreimage, nonce: Option<Nonce>,
+	) -> Self {
+		Self { invoice, preimage, nonce }
+	}
+
+	/// The payment preimage proving the invoice was paid.
+	pub fn preimage(&self) -> PaymentPreimage {
+		self.preimage
+	}
+
+	pub(crate) fn invoice_type(&self) -> &Bolt12InvoiceType {
+		&self.invoice
+	}
+
+	pub(crate) fn nonce(&self) -> Option<Nonce> {
+		self.nonce
+	}
+
+	/// Returns the [`Bolt12Invoice`] if the payment was for a standard BOLT 12 invoice.
+	pub fn bolt12_invoice(&self) -> Option<&Bolt12Invoice> {
+		match &self.invoice {
+			Bolt12InvoiceType::Bolt12Invoice(invoice) => Some(invoice),
+			_ => None,
+		}
+	}
+
+	/// Returns the [`StaticInvoice`] if the payment was for an async payment.
+	pub fn static_invoice(&self) -> Option<&StaticInvoice> {
+		match &self.invoice {
+			Bolt12InvoiceType::StaticInvoice(invoice) => Some(invoice),
+			_ => None,
+		}
+	}
+
+	/// Creates a [`PayerProofBuilder`] for this paid invoice.
+	pub fn prove_payer(
+		&self,
+	) -> Result<PayerProofBuilder<'_, ExplicitSigningKey>, PayerProofError> {
+		let invoice = self.bolt12_invoice().ok_or(PayerProofError::IncompatibleInvoice)?;
+		PayerProofBuilder::new(invoice, self.preimage)
+	}
+
+	/// Creates a [`PayerProofBuilder`] with a pre-derived signing keypair.
+	///
+	/// This re-derives the payer signing key, failing early if derivation fails.
+	pub fn prove_payer_derived<T: secp256k1::Signing>(
+		&self, expanded_key: &ExpandedKey, payment_id: PaymentId, secp_ctx: &Secp256k1<T>,
+	) -> Result<PayerProofBuilder<'_, DerivedSigningKey>, PayerProofError> {
+		let nonce = self.nonce.ok_or(PayerProofError::KeyDerivationFailed)?;
+		let invoice = self.bolt12_invoice().ok_or(PayerProofError::IncompatibleInvoice)?;
+		PayerProofBuilder::new_derived(
+			invoice,
+			self.preimage,
+			expanded_key,
+			nonce,
+			payment_id,
+			secp_ctx,
+		)
+	}
+}
+
 const TLV_SIGNATURE: u64 = 240;
 const TLV_PREIMAGE: u64 = 242;
 const TLV_OMITTED_TLVS: u64 = 244;
@@ -72,6 +169,10 @@ const PAYER_SIGNATURE_TAG: &str = concat!("lightning", "payer_proof", "payer_sig
 /// Error when building or verifying a payer proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PayerProofError {
+	/// The invoice is not a [`Bolt12Invoice`] (e.g., it is a [`StaticInvoice`]).
+	///
+	/// [`StaticInvoice`]: crate::offers::static_invoice::StaticInvoice
+	IncompatibleInvoice,
 	/// The preimage doesn't match the invoice's payment hash.
 	PreimageMismatch,
 	/// Error during merkle tree operations.
@@ -167,12 +268,10 @@ mod sealed_signing {
 }
 
 impl<'a> PayerProofBuilder<'a, ExplicitSigningKey> {
-	/// Create a new builder from a paid invoice and its preimage.
+	/// Create a new builder from an invoice and its payment preimage.
 	///
 	/// Returns an error if the preimage doesn't match the invoice's payment hash.
-	pub(super) fn new(
-		invoice: &'a Bolt12Invoice, preimage: PaymentPreimage,
-	) -> Result<Self, PayerProofError> {
+	fn new(invoice: &'a Bolt12Invoice, preimage: PaymentPreimage) -> Result<Self, PayerProofError> {
 		let computed_hash = sha256::Hash::hash(&preimage.0);
 		if computed_hash.as_byte_array() != &invoice.payment_hash().0 {
 			return Err(PayerProofError::PreimageMismatch);
@@ -203,16 +302,11 @@ impl<'a> PayerProofBuilder<'a, ExplicitSigningKey> {
 }
 
 impl<'a> PayerProofBuilder<'a, DerivedSigningKey> {
-	/// Create a new builder from a paid invoice with a pre-derived signing keypair.
+	/// Create a new builder with a pre-derived signing keypair.
 	///
-	/// This eagerly derives the payer signing key using the same derivation scheme as
-	/// invoice requests created with `deriving_signing_pubkey`. Fails early if key
-	/// derivation fails.
-	///
-	/// The `nonce` and `payment_id` are available from [`Event::PaymentSent`].
-	///
-	/// [`Event::PaymentSent`]: crate::events::Event::PaymentSent
-	pub(super) fn new_derived<T: secp256k1::Signing>(
+	/// Derives the payer signing key using the same derivation scheme as invoice requests
+	/// created with `deriving_signing_pubkey`. Fails early if key derivation fails.
+	fn new_derived<T: secp256k1::Signing>(
 		invoice: &'a Bolt12Invoice, preimage: PaymentPreimage, expanded_key: &ExpandedKey,
 		nonce: Nonce, payment_id: PaymentId, secp_ctx: &Secp256k1<T>,
 	) -> Result<Self, PayerProofError> {
@@ -1580,8 +1674,10 @@ mod tests {
 
 		let secp_ctx = Secp256k1::signing_only();
 		let payer_keys = payer_keys();
-		let proof = invoice
-			.payer_proof_builder(preimage)
+		let paid_invoice =
+			PaidBolt12Invoice::new(Bolt12InvoiceType::Bolt12Invoice(invoice), preimage, None);
+		let payer_proof = paid_invoice
+			.prove_payer()
 			.unwrap()
 			.build(None)
 			.unwrap()
@@ -1589,9 +1685,9 @@ mod tests {
 				Ok(secp_ctx.sign_schnorr_no_aux_rand(proof.as_ref().as_digest(), &payer_keys))
 			})
 			.unwrap();
-		let parsed = PayerProof::try_from(proof.bytes().to_vec()).unwrap();
+		let parsed = PayerProof::try_from(payer_proof.bytes().to_vec()).unwrap();
 
-		assert_eq!(parsed.bytes(), proof.bytes());
+		assert_eq!(parsed.bytes(), payer_proof.bytes());
 		assert_eq!(parsed.preimage(), preimage);
 		assert_eq!(parsed.payment_hash(), payment_hash);
 	}
@@ -1630,12 +1726,17 @@ mod tests {
 		.sign(recipient_sign)
 		.unwrap();
 
-		let proof = invoice
-			.payer_proof_builder_derived(preimage, &expanded_key, nonce, payment_id, &secp_ctx)
+		let paid_invoice = PaidBolt12Invoice::new(
+			Bolt12InvoiceType::Bolt12Invoice(invoice),
+			preimage,
+			Some(nonce),
+		);
+		let payer_proof = paid_invoice
+			.prove_payer_derived(&expanded_key, payment_id, &secp_ctx)
 			.unwrap()
 			.build_and_sign(Some("refund".into()))
 			.unwrap();
-		let parsed = PayerProof::try_from(proof.bytes().to_vec()).unwrap();
+		let parsed = PayerProof::try_from(payer_proof.bytes().to_vec()).unwrap();
 
 		assert_eq!(parsed.preimage(), preimage);
 		assert_eq!(parsed.payment_hash(), payment_hash);

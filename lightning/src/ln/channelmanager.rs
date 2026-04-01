@@ -49,11 +49,11 @@ use crate::chain::channelmonitor::{
 };
 use crate::chain::transaction::{OutPoint, TransactionData};
 use crate::chain::{BestBlock, ChannelMonitorUpdateStatus, Confirm, Watch};
+use crate::events::FundingInfo;
 use crate::events::{
 	self, ClosureReason, Event, EventHandler, EventsProvider, HTLCHandlingFailureType,
 	InboundChannelFunds, PaymentFailureReason, ReplayEvent,
 };
-use crate::events::{FundingInfo, PaidBolt12Invoice};
 use crate::ln::chan_utils::selected_commitment_sat_per_1000_weight;
 #[cfg(any(test, fuzzing, feature = "_test_utils"))]
 use crate::ln::channel::QuiescentAction;
@@ -102,6 +102,7 @@ use crate::offers::invoice_request::{InvoiceRequest, InvoiceRequestVerifiedFromO
 use crate::offers::nonce::Nonce;
 use crate::offers::offer::{Offer, OfferFromHrn};
 use crate::offers::parse::Bolt12SemanticError;
+use crate::offers::payer_proof::Bolt12InvoiceType;
 use crate::offers::refund::Refund;
 use crate::offers::static_invoice::StaticInvoice;
 use crate::onion_message::async_payments::{
@@ -832,15 +833,19 @@ mod fuzzy_channelmanager {
 			/// doing a double-pass on route when we get a failure back
 			first_hop_htlc_msat: u64,
 			payment_id: PaymentId,
-			/// The BOLT12 invoice associated with this payment, if any. This is stored here to ensure
-			/// we can provide proof-of-payment details in payment claim events even after a restart
-			/// with a stale ChannelManager state.
-			bolt12_invoice: Option<PaidBolt12Invoice>,
+			/// The BOLT 12 invoice associated with this payment, if any. Stored here so it can
+			/// be bundled into [`PaidBolt12Invoice`] in [`Event::PaymentSent`] even after a
+			/// restart with a stale `ChannelManager` state.
+			///
+			/// [`PaidBolt12Invoice`]: crate::offers::payer_proof::PaidBolt12Invoice
+			/// [`Event::PaymentSent`]: crate::events::Event::PaymentSent
+			bolt12_invoice: Option<Bolt12InvoiceType>,
 			/// The [`Nonce`] used when the BOLT 12 [`InvoiceRequest`] was created. Stored here so
-			/// it can be included in [`Event::PaymentSent`] for building payer proofs, even after
+			/// it can be bundled into [`PaidBolt12Invoice`] for building payer proofs, even after
 			/// a restart with a stale `ChannelManager` state.
 			///
 			/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
+			/// [`PaidBolt12Invoice`]: crate::offers::payer_proof::PaidBolt12Invoice
 			payment_nonce: Option<Nonce>,
 		},
 	}
@@ -979,9 +984,9 @@ impl HTLCSource {
 	pub(crate) fn static_invoice(&self) -> Option<StaticInvoice> {
 		match self {
 			Self::OutboundRoute {
-				bolt12_invoice: Some(PaidBolt12Invoice::StaticInvoice(inv)),
+				bolt12_invoice: Some(Bolt12InvoiceType::StaticInvoice(invoice)),
 				..
-			} => Some(inv.clone()),
+			} => Some(invoice.clone()),
 			_ => None,
 		}
 	}
@@ -17796,7 +17801,7 @@ impl Readable for HTLCSource {
 				let mut payment_id = None;
 				let mut payment_params: Option<PaymentParameters> = None;
 				let mut blinded_tail: Option<BlindedTail> = None;
-				let mut bolt12_invoice: Option<PaidBolt12Invoice> = None;
+				let mut bolt12_invoice: Option<Bolt12InvoiceType> = None;
 				let mut payment_nonce: Option<Nonce> = None;
 				read_tlv_fields!(reader, {
 					(0, session_priv, required),

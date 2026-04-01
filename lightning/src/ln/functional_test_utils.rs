@@ -17,8 +17,8 @@ use crate::chain::{BestBlock, ChannelMonitorUpdateStatus, Confirm, Listen, Watch
 use crate::events::bump_transaction::sync::BumpTransactionEventHandlerSync;
 use crate::events::bump_transaction::BumpTransactionEvent;
 use crate::events::{
-	ClaimedHTLC, ClosureReason, Event, FundingInfo, HTLCHandlingFailureType, PaidBolt12Invoice,
-	PathFailure, PaymentFailureReason, PaymentPurpose,
+	ClaimedHTLC, ClosureReason, Event, FundingInfo, HTLCHandlingFailureType, PathFailure,
+	PaymentFailureReason, PaymentPurpose,
 };
 use crate::ln::chan_utils::{
 	commitment_tx_base_weight, COMMITMENT_TX_WEIGHT_PER_HTLC, TRUC_MAX_WEIGHT,
@@ -37,6 +37,7 @@ use crate::ln::outbound_payment::RecipientOnionFields;
 use crate::ln::outbound_payment::Retry;
 use crate::ln::peer_handler::IgnoringMessageHandler;
 use crate::ln::types::ChannelId;
+use crate::offers::payer_proof::PaidBolt12Invoice;
 use crate::onion_message::messenger::OnionMessenger;
 use crate::routing::gossip::{NetworkGraph, NetworkUpdate, P2PGossipSync};
 use crate::routing::router::{self, PaymentParameters, Route, RouteParameters};
