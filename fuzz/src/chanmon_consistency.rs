@@ -1722,6 +1722,156 @@ impl PaymentTracker {
 	}
 }
 
+struct Harness<'a, Out: Output + MaybeSend + MaybeSync> {
+	out: Out,
+	chan_type: ChanType,
+	chain_state: ChainState,
+	nodes: [HarnessNode<'a>; 3],
+	ab_link: PeerLink,
+	bc_link: PeerLink,
+	queues: EventQueues,
+	payments: PaymentTracker,
+}
+
+impl<'a, Out: Output + MaybeSend + MaybeSync> Harness<'a, Out> {
+	fn new(config_byte: u8, out: Out, router: &'a FuzzRouter) -> Self {
+		let chan_type = match (config_byte >> 3) & 0b11 {
+			0 => ChanType::Legacy,
+			1 => ChanType::KeyedAnchors,
+			_ => ChanType::ZeroFeeCommitments,
+		};
+		let persistence_styles = [
+			if config_byte & 0b01 != 0 {
+				ChannelMonitorUpdateStatus::InProgress
+			} else {
+				ChannelMonitorUpdateStatus::Completed
+			},
+			if config_byte & 0b10 != 0 {
+				ChannelMonitorUpdateStatus::InProgress
+			} else {
+				ChannelMonitorUpdateStatus::Completed
+			},
+			if config_byte & 0b100 != 0 {
+				ChannelMonitorUpdateStatus::InProgress
+			} else {
+				ChannelMonitorUpdateStatus::Completed
+			},
+		];
+
+		let wallet_a = TestWalletSource::new(SecretKey::from_slice(&[1; 32]).unwrap());
+		let wallet_b = TestWalletSource::new(SecretKey::from_slice(&[2; 32]).unwrap());
+		let wallet_c = TestWalletSource::new(SecretKey::from_slice(&[3; 32]).unwrap());
+		let wallets = [&wallet_a, &wallet_b, &wallet_c];
+		let coinbase_tx = bitcoin::Transaction {
+			version: bitcoin::transaction::Version::TWO,
+			lock_time: bitcoin::absolute::LockTime::ZERO,
+			input: vec![bitcoin::TxIn { ..Default::default() }],
+			output: wallets
+				.iter()
+				.map(|wallet| TxOut {
+					value: Amount::from_sat(100_000),
+					script_pubkey: wallet.get_change_script().unwrap(),
+				})
+				.collect(),
+		};
+		for (idx, wallet) in wallets.iter().enumerate() {
+			wallet.add_utxo(coinbase_tx.clone(), idx as u32);
+		}
+
+		let fee_est_a = Arc::new(FuzzEstimator { ret_val: atomic::AtomicU32::new(253) });
+		let fee_est_b = Arc::new(FuzzEstimator { ret_val: atomic::AtomicU32::new(253) });
+		let fee_est_c = Arc::new(FuzzEstimator { ret_val: atomic::AtomicU32::new(253) });
+		let broadcast_a = Arc::new(TestBroadcaster { txn_broadcasted: RefCell::new(Vec::new()) });
+		let broadcast_b = Arc::new(TestBroadcaster { txn_broadcasted: RefCell::new(Vec::new()) });
+		let broadcast_c = Arc::new(TestBroadcaster { txn_broadcasted: RefCell::new(Vec::new()) });
+
+		// 3 nodes is enough to hit all the possible cases, notably
+		// unknown-source-unknown-dest forwarding.
+		let mut nodes = [
+			HarnessNode::new(
+				0,
+				wallet_a,
+				Arc::clone(&fee_est_a),
+				Arc::clone(&broadcast_a),
+				persistence_styles[0],
+				&out,
+				router,
+				chan_type,
+			),
+			HarnessNode::new(
+				1,
+				wallet_b,
+				Arc::clone(&fee_est_b),
+				Arc::clone(&broadcast_b),
+				persistence_styles[1],
+				&out,
+				router,
+				chan_type,
+			),
+			HarnessNode::new(
+				2,
+				wallet_c,
+				Arc::clone(&fee_est_c),
+				Arc::clone(&broadcast_c),
+				persistence_styles[2],
+				&out,
+				router,
+				chan_type,
+			),
+		];
+		let mut chain_state = ChainState::new();
+
+		// Connect peers first, then create channels.
+		connect_peers(&nodes[0], &nodes[1]);
+		connect_peers(&nodes[1], &nodes[2]);
+
+		// Create 3 channels between A-B and 3 channels between B-C (6 total).
+		make_channel(&nodes[0], &nodes[1], 1, false, false, &mut chain_state);
+		make_channel(&nodes[0], &nodes[1], 2, true, true, &mut chain_state);
+		make_channel(&nodes[0], &nodes[1], 3, false, true, &mut chain_state);
+		make_channel(&nodes[1], &nodes[2], 4, false, true, &mut chain_state);
+		make_channel(&nodes[1], &nodes[2], 5, true, false, &mut chain_state);
+		make_channel(&nodes[1], &nodes[2], 6, false, false, &mut chain_state);
+
+		// Wipe the transactions-broadcasted set to make sure we don't broadcast
+		// any transactions during normal operation after setup.
+		nodes[0].broadcaster.txn_broadcasted.borrow_mut().clear();
+		nodes[1].broadcaster.txn_broadcasted.borrow_mut().clear();
+		nodes[2].broadcaster.txn_broadcasted.borrow_mut().clear();
+
+		// Sync all nodes to tip to lock the funding.
+		nodes[0].sync_with_chain_state(&chain_state, None);
+		nodes[1].sync_with_chain_state(&chain_state, None);
+		nodes[2].sync_with_chain_state(&chain_state, None);
+
+		lock_fundings(&nodes);
+
+		let chan_ab_ids = {
+			let node_a_chans = nodes[0].list_usable_channels();
+			[node_a_chans[0].channel_id, node_a_chans[1].channel_id, node_a_chans[2].channel_id]
+		};
+		let chan_bc_ids = {
+			let node_c_chans = nodes[2].list_usable_channels();
+			[node_c_chans[0].channel_id, node_c_chans[1].channel_id, node_c_chans[2].channel_id]
+		};
+
+		for node in &mut nodes {
+			node.serialized_manager = node.encode();
+		}
+
+		Self {
+			out,
+			chan_type,
+			chain_state,
+			nodes,
+			ab_link: PeerLink::new(0, 1, chan_ab_ids),
+			bc_link: PeerLink::new(1, 2, chan_bc_ids),
+			queues: EventQueues::new(),
+			payments: PaymentTracker::new(),
+		}
+	}
+}
+
 fn build_node_config(chan_type: ChanType) -> UserConfig {
 	let mut config = UserConfig::default();
 	config.channel_config.forwarding_fee_proportional_millionths = 0;
@@ -1951,151 +2101,19 @@ fn lock_fundings(nodes: &[HarnessNode<'_>; 3]) {
 pub fn do_test<Out: Output + MaybeSend + MaybeSync>(data: &[u8], out: Out) {
 	let router = FuzzRouter {};
 
-	// Read initial monitor styles and channel type from fuzz input byte 0:
-	// bits 0-2: monitor styles (1 bit per node)
-	// bits 3-4: channel type (0=Legacy, 1=KeyedAnchors, 2=ZeroFeeCommitments)
 	let config_byte = if !data.is_empty() { data[0] } else { 0 };
-	let chan_type = match (config_byte >> 3) & 0b11 {
-		0 => ChanType::Legacy,
-		1 => ChanType::KeyedAnchors,
-		_ => ChanType::ZeroFeeCommitments,
-	};
-	let persistence_styles = [
-		if config_byte & 0b01 != 0 {
-			ChannelMonitorUpdateStatus::InProgress
-		} else {
-			ChannelMonitorUpdateStatus::Completed
-		},
-		if config_byte & 0b10 != 0 {
-			ChannelMonitorUpdateStatus::InProgress
-		} else {
-			ChannelMonitorUpdateStatus::Completed
-		},
-		if config_byte & 0b100 != 0 {
-			ChannelMonitorUpdateStatus::InProgress
-		} else {
-			ChannelMonitorUpdateStatus::Completed
-		},
-	];
-
-	let mut chain_state = ChainState::new();
-	let wallet_a = TestWalletSource::new(SecretKey::from_slice(&[1; 32]).unwrap());
-	let wallet_b = TestWalletSource::new(SecretKey::from_slice(&[2; 32]).unwrap());
-	let wallet_c = TestWalletSource::new(SecretKey::from_slice(&[3; 32]).unwrap());
-
-	let wallets = [&wallet_a, &wallet_b, &wallet_c];
-	let coinbase_tx = bitcoin::Transaction {
-		version: bitcoin::transaction::Version::TWO,
-		lock_time: bitcoin::absolute::LockTime::ZERO,
-		input: vec![bitcoin::TxIn { ..Default::default() }],
-		output: wallets
-			.iter()
-			.map(|wallet| TxOut {
-				value: Amount::from_sat(100_000),
-				script_pubkey: wallet.get_change_script().unwrap(),
-			})
-			.collect(),
-	};
-	for (idx, wallet) in wallets.iter().enumerate() {
-		wallet.add_utxo(coinbase_tx.clone(), idx as u32);
-	}
-
-	let fee_est_a = Arc::new(FuzzEstimator { ret_val: atomic::AtomicU32::new(253) });
-	let fee_est_b = Arc::new(FuzzEstimator { ret_val: atomic::AtomicU32::new(253) });
-	let fee_est_c = Arc::new(FuzzEstimator { ret_val: atomic::AtomicU32::new(253) });
-	let broadcast_a = Arc::new(TestBroadcaster { txn_broadcasted: RefCell::new(Vec::new()) });
-	let broadcast_b = Arc::new(TestBroadcaster { txn_broadcasted: RefCell::new(Vec::new()) });
-	let broadcast_c = Arc::new(TestBroadcaster { txn_broadcasted: RefCell::new(Vec::new()) });
-
-	// 3 nodes is enough to hit all the possible cases, notably unknown-source-unknown-dest
-	// forwarding.
-	let mut nodes = [
-		HarnessNode::new(
-			0,
-			wallet_a,
-			Arc::clone(&fee_est_a),
-			Arc::clone(&broadcast_a),
-			persistence_styles[0],
-			&out,
-			&router,
-			chan_type,
-		),
-		HarnessNode::new(
-			1,
-			wallet_b,
-			Arc::clone(&fee_est_b),
-			Arc::clone(&broadcast_b),
-			persistence_styles[1],
-			&out,
-			&router,
-			chan_type,
-		),
-		HarnessNode::new(
-			2,
-			wallet_c,
-			Arc::clone(&fee_est_c),
-			Arc::clone(&broadcast_c),
-			persistence_styles[2],
-			&out,
-			&router,
-			chan_type,
-		),
-	];
-
-	// Connect peers first, then create channels
-	connect_peers(&nodes[0], &nodes[1]);
-	connect_peers(&nodes[1], &nodes[2]);
-
-	// Create 3 channels between A-B and 3 channels between B-C (6 total).
-	//
-	// Use distinct version numbers for each funding transaction so each test channel gets its own
-	// txid and funding outpoint.
-	// A-B: channel 2 A and B have 0-reserve (trusted open + trusted accept),
-	//       channel 3 A has 0-reserve (trusted accept)
-	make_channel(&nodes[0], &nodes[1], 1, false, false, &mut chain_state);
-	make_channel(&nodes[0], &nodes[1], 2, true, true, &mut chain_state);
-	make_channel(&nodes[0], &nodes[1], 3, false, true, &mut chain_state);
-	// B-C: channel 4 B has 0-reserve (via trusted accept),
-	//       channel 5 C has 0-reserve (via trusted open)
-	make_channel(&nodes[1], &nodes[2], 4, false, true, &mut chain_state);
-	make_channel(&nodes[1], &nodes[2], 5, true, false, &mut chain_state);
-	make_channel(&nodes[1], &nodes[2], 6, false, false, &mut chain_state);
-
-	// Wipe the transactions-broadcasted set to make sure we don't broadcast any transactions
-	// during normal operation after setup.
-	nodes[0].broadcaster.txn_broadcasted.borrow_mut().clear();
-	nodes[1].broadcaster.txn_broadcasted.borrow_mut().clear();
-	nodes[2].broadcaster.txn_broadcasted.borrow_mut().clear();
-
-	// Sync all nodes to tip to lock the funding.
-	nodes[0].sync_with_chain_state(&chain_state, None);
-	nodes[1].sync_with_chain_state(&chain_state, None);
-	nodes[2].sync_with_chain_state(&chain_state, None);
-
-	lock_fundings(&nodes);
-
-	// Get channel IDs for all A-B channels (from node A's perspective)
-	let chan_ab_ids = {
-		let node_a_chans = nodes[0].list_usable_channels();
-		[node_a_chans[0].channel_id, node_a_chans[1].channel_id, node_a_chans[2].channel_id]
-	};
-	// Get channel IDs for all B-C channels (from node C's perspective)
-	let chan_bc_ids = {
-		let node_c_chans = nodes[2].list_usable_channels();
-		[node_c_chans[0].channel_id, node_c_chans[1].channel_id, node_c_chans[2].channel_id]
-	};
-	let mut ab_link = PeerLink::new(0, 1, chan_ab_ids);
-	let mut bc_link = PeerLink::new(1, 2, chan_bc_ids);
-	// Keep old names for backward compatibility in existing code
+	let Harness {
+		out,
+		chan_type,
+		mut chain_state,
+		mut nodes,
+		mut ab_link,
+		mut bc_link,
+		mut queues,
+		mut payments,
+	} = Harness::new(config_byte, out, &router);
 	let chan_a_id = ab_link.first_channel_id();
 	let chan_b_id = bc_link.first_channel_id();
-
-	let mut queues = EventQueues::new();
-	let mut payments = PaymentTracker::new();
-
-	for node in &mut nodes {
-		node.serialized_manager = node.encode();
-	}
 
 	let mut read_pos = 1; // First byte was consumed for initial config.
 	'fuzz_loop: loop {
