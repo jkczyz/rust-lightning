@@ -699,11 +699,11 @@ impl<'a> HarnessNode<'a> {
 	}
 
 	fn new<Out: Output + MaybeSend + MaybeSync>(
+		context: &HarnessContext<'a, Out>,
 		node_id: u8, wallet: TestWalletSource, fee_estimator: Arc<FuzzEstimator>,
 		broadcaster: Arc<TestBroadcaster>, persistence_style: ChannelMonitorUpdateStatus,
-		out: &Out, router: &'a FuzzRouter, chan_type: ChanType,
 	) -> Self {
-		let (logger_for_monitor, logger) = Self::build_loggers(node_id, out);
+		let (logger_for_monitor, logger) = Self::build_loggers(node_id, &context.out);
 		let node_secret = SecretKey::from_slice(&[
 			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 			0, 1, node_id,
@@ -728,13 +728,13 @@ impl<'a> HarnessNode<'a> {
 			Arc::clone(&fee_estimator),
 			Arc::clone(&monitor),
 			Arc::clone(&broadcaster),
-			router,
-			router,
+			context.router,
+			context.router,
 			Arc::clone(&logger),
 			Arc::clone(&keys_manager),
 			Arc::clone(&keys_manager),
 			Arc::clone(&keys_manager),
-			build_node_config(chan_type),
+			build_node_config(context.chan_type),
 			params,
 			best_block_timestamp,
 		);
@@ -751,7 +751,7 @@ impl<'a> HarnessNode<'a> {
 			serialized_manager: Vec::new(),
 			height: 0,
 			last_htlc_clear_fee: INITIAL_HTLC_CLEAR_FEERATE,
-			chan_type,
+			chan_type: context.chan_type,
 		}
 	}
 
@@ -942,9 +942,9 @@ impl<'a> HarnessNode<'a> {
 	}
 
 	fn reload<Out: Output + MaybeSend + MaybeSync>(
-		&mut self, use_old_mons: u8, out: &Out, router: &'a FuzzRouter, chan_type: ChanType,
+		&mut self, context: &HarnessContext<'a, Out>, use_old_mons: u8,
 	) {
-		let (logger_for_monitor, logger) = Self::build_loggers(self.node_id, out);
+		let (logger_for_monitor, logger) = Self::build_loggers(self.node_id, &context.out);
 		let chain_monitor = Self::build_chain_monitor(
 			&self.broadcaster,
 			&self.fee_estimator,
@@ -1002,10 +1002,10 @@ impl<'a> HarnessNode<'a> {
 			fee_estimator: Arc::clone(&self.fee_estimator),
 			chain_monitor: Arc::clone(&chain_monitor),
 			tx_broadcaster: Arc::clone(&self.broadcaster),
-			router,
-			message_router: router,
+			router: context.router,
+			message_router: context.router,
 			logger: Arc::clone(&logger),
-			config: build_node_config(chan_type),
+			config: build_node_config(context.chan_type),
 			channel_monitors: monitor_refs,
 		};
 
@@ -1755,9 +1755,14 @@ impl PaymentTracker {
 	}
 }
 
-struct Harness<'a, Out: Output + MaybeSend + MaybeSync> {
+struct HarnessContext<'a, Out: Output + MaybeSend + MaybeSync> {
 	out: Out,
+	router: &'a FuzzRouter,
 	chan_type: ChanType,
+}
+
+struct Harness<'a, Out: Output + MaybeSend + MaybeSync> {
+	context: HarnessContext<'a, Out>,
 	chain_state: ChainState,
 	nodes: [HarnessNode<'a>; 3],
 	ab_link: PeerLink,
@@ -1998,6 +2003,7 @@ impl<'a, Out: Output + MaybeSend + MaybeSync> Harness<'a, Out> {
 			1 => ChanType::KeyedAnchors,
 			_ => ChanType::ZeroFeeCommitments,
 		};
+		let context = HarnessContext { out, router, chan_type };
 		let persistence_styles = [
 			if config_byte & 0b01 != 0 {
 				ChannelMonitorUpdateStatus::InProgress
@@ -2047,34 +2053,28 @@ impl<'a, Out: Output + MaybeSend + MaybeSync> Harness<'a, Out> {
 		// unknown-source-unknown-dest forwarding.
 		let mut nodes = [
 			HarnessNode::new(
+				&context,
 				0,
 				wallet_a,
 				Arc::clone(&fee_est_a),
 				Arc::clone(&broadcast_a),
 				persistence_styles[0],
-				&out,
-				router,
-				chan_type,
 			),
 			HarnessNode::new(
+				&context,
 				1,
 				wallet_b,
 				Arc::clone(&fee_est_b),
 				Arc::clone(&broadcast_b),
 				persistence_styles[1],
-				&out,
-				router,
-				chan_type,
 			),
 			HarnessNode::new(
+				&context,
 				2,
 				wallet_c,
 				Arc::clone(&fee_est_c),
 				Arc::clone(&broadcast_c),
 				persistence_styles[2],
-				&out,
-				router,
-				chan_type,
 			),
 		];
 		let mut chain_state = ChainState::new();
@@ -2127,8 +2127,7 @@ impl<'a, Out: Output + MaybeSend + MaybeSync> Harness<'a, Out> {
 		}
 
 		Self {
-			out,
-			chan_type,
+			context,
 			chain_state,
 			nodes,
 			ab_link: PeerLink::new(0, 1, chan_ab_ids),
@@ -2492,7 +2491,7 @@ impl<'a, Out: Output + MaybeSend + MaybeSync> Harness<'a, Out> {
 		}
 
 		let nodes = &self.nodes;
-		let out = &self.out;
+		let out = &self.context.out;
 		let queues = &mut self.queues;
 		let mut events = queues.take_for_node(node_idx);
 		let mut new_events = Vec::new();
@@ -2680,7 +2679,7 @@ impl<'a, Out: Output + MaybeSend + MaybeSync> Harness<'a, Out> {
 		self.bc_link.reconnect(&self.nodes);
 	}
 
-	fn restart_node(&mut self, node_idx: usize, v: u8, router: &'a FuzzRouter) {
+	fn restart_node(&mut self, node_idx: usize, v: u8) {
 		match node_idx {
 			0 => {
 				self.ab_link.disconnect_for_reload(0, &self.nodes, &mut self.queues);
@@ -2694,7 +2693,7 @@ impl<'a, Out: Output + MaybeSend + MaybeSync> Harness<'a, Out> {
 			},
 			_ => panic!("invalid node index"),
 		}
-		self.nodes[node_idx].reload(v, &self.out, router, self.chan_type);
+		self.nodes[node_idx].reload(&self.context, v);
 	}
 
 	fn settle_all(&mut self) {
@@ -2772,6 +2771,7 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(data: &[u8], out: Out) {
 		let v = data[read_pos];
 		read_pos += 1;
 		harness
+			.context
 			.out
 			.locked_write(format!("READ A BYTE! HANDLING INPUT {:x}...........\n", v).as_bytes());
 		match v {
@@ -3005,17 +3005,17 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(data: &[u8], out: Out) {
 			0xb0 | 0xb1 | 0xb2 => {
 				// Restart node A, picking among the in-flight `ChannelMonitor`s to use based on
 				// the value of `v` we're matching.
-				harness.restart_node(0, v, &router);
+				harness.restart_node(0, v);
 			},
 			0xb3..=0xbb => {
 				// Restart node B, picking among the in-flight `ChannelMonitor`s to use based on
 				// the value of `v` we're matching.
-				harness.restart_node(1, v, &router);
+				harness.restart_node(1, v);
 			},
 			0xbc | 0xbd | 0xbe => {
 				// Restart node C, picking among the in-flight `ChannelMonitor`s to use based on
 				// the value of `v` we're matching.
-				harness.restart_node(2, v, &router);
+				harness.restart_node(2, v);
 			},
 
 			0xc0 => harness.nodes[0].keys_manager.disable_supported_ops_for_all_signers(),
