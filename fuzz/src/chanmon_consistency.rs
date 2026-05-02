@@ -1031,6 +1031,19 @@ enum MonitorUpdateSelector {
 	Last,
 }
 
+#[derive(Copy, Clone)]
+enum MppDirectChannels {
+	All,
+	RepeatedFirst,
+}
+
+#[derive(Copy, Clone)]
+enum MppHopChannels {
+	FirstHop,
+	BothHops,
+	SecondHop,
+}
+
 struct EventQueues {
 	ab: Vec<MessageSendEvent>,
 	ba: Vec<MessageSendEvent>,
@@ -2180,6 +2193,81 @@ impl<'a, Out: Output + MaybeSend + MaybeSync> Harness<'a, Out> {
 		);
 	}
 
+	fn send_mpp_direct(
+		&mut self, source_idx: usize, dest_idx: usize, channels: MppDirectChannels, amt: u64,
+	) {
+		match channels {
+			MppDirectChannels::All => {
+				let dest_chan_ids = self.channel_ids_between(source_idx, dest_idx);
+				self.payments.send_mpp_direct(
+					&self.nodes,
+					source_idx,
+					dest_idx,
+					&dest_chan_ids,
+					amt,
+				);
+			},
+			MppDirectChannels::RepeatedFirst => {
+				let dest_chan_id = self.first_channel_id_between(source_idx, dest_idx);
+				let dest_chan_ids = [dest_chan_id, dest_chan_id, dest_chan_id];
+				self.payments.send_mpp_direct(
+					&self.nodes,
+					source_idx,
+					dest_idx,
+					&dest_chan_ids,
+					amt,
+				);
+			},
+		}
+	}
+
+	fn send_mpp_hop(
+		&mut self, source_idx: usize, middle_idx: usize, dest_idx: usize, channels: MppHopChannels,
+		amt: u64,
+	) {
+		let middle_chan_ids = self.channel_ids_between(source_idx, middle_idx);
+		let dest_chan_ids = self.channel_ids_between(middle_idx, dest_idx);
+		let middle_first_chan_id = middle_chan_ids[0];
+		let dest_first_chan_id = dest_chan_ids[0];
+		match channels {
+			MppHopChannels::FirstHop => {
+				let dest_chan_ids = [dest_first_chan_id];
+				self.payments.send_mpp_hop(
+					&self.nodes,
+					source_idx,
+					middle_idx,
+					&middle_chan_ids,
+					dest_idx,
+					&dest_chan_ids,
+					amt,
+				);
+			},
+			MppHopChannels::BothHops => {
+				self.payments.send_mpp_hop(
+					&self.nodes,
+					source_idx,
+					middle_idx,
+					&middle_chan_ids,
+					dest_idx,
+					&dest_chan_ids,
+					amt,
+				);
+			},
+			MppHopChannels::SecondHop => {
+				let middle_chan_ids = [middle_first_chan_id];
+				self.payments.send_mpp_hop(
+					&self.nodes,
+					source_idx,
+					middle_idx,
+					&middle_chan_ids,
+					dest_idx,
+					&dest_chan_ids,
+					amt,
+				);
+			},
+		}
+	}
+
 	fn process_msg_events(
 		&mut self, node_idx: usize, corrupt_forward: bool, limit_events: ProcessMessages,
 	) -> bool {
@@ -2812,54 +2900,15 @@ pub fn do_test<Out: Output + MaybeSend + MaybeSync>(data: &[u8], out: Out) {
 
 			// MPP payments
 			// 0x70: direct MPP from 0 to 1 (multi A-B channels)
-			0x70 => harness.payments.send_mpp_direct(
-				&harness.nodes,
-				0,
-				1,
-				harness.ab_link.channel_ids(),
-				1_000_000,
-			),
+			0x70 => harness.send_mpp_direct(0, 1, MppDirectChannels::All, 1_000_000),
 			// 0x71: MPP 0->1->2, multi channels on first hop (A-B)
-			0x71 => harness.payments.send_mpp_hop(
-				&harness.nodes,
-				0,
-				1,
-				harness.ab_link.channel_ids(),
-				2,
-				&[harness.bc_link.first_channel_id()],
-				1_000_000,
-			),
+			0x71 => harness.send_mpp_hop(0, 1, 2, MppHopChannels::FirstHop, 1_000_000),
 			// 0x72: MPP 0->1->2, multi channels on both hops (A-B and B-C)
-			0x72 => harness.payments.send_mpp_hop(
-				&harness.nodes,
-				0,
-				1,
-				harness.ab_link.channel_ids(),
-				2,
-				harness.bc_link.channel_ids(),
-				1_000_000,
-			),
+			0x72 => harness.send_mpp_hop(0, 1, 2, MppHopChannels::BothHops, 1_000_000),
 			// 0x73: MPP 0->1->2, multi channels on second hop (B-C)
-			0x73 => harness.payments.send_mpp_hop(
-				&harness.nodes,
-				0,
-				1,
-				&[harness.ab_link.first_channel_id()],
-				2,
-				harness.bc_link.channel_ids(),
-				1_000_000,
-			),
+			0x73 => harness.send_mpp_hop(0, 1, 2, MppHopChannels::SecondHop, 1_000_000),
 			// 0x74: direct MPP from 0 to 1, multi parts over single channel
-			0x74 => {
-				let chan_id = harness.ab_link.first_channel_id();
-				harness.payments.send_mpp_direct(
-					&harness.nodes,
-					0,
-					1,
-					&[chan_id, chan_id, chan_id],
-					1_000_000,
-				)
-			},
+			0x74 => harness.send_mpp_direct(0, 1, MppDirectChannels::RepeatedFirst, 1_000_000),
 
 			0x80 => harness.nodes[0].bump_fee_estimate(),
 			0x81 => harness.nodes[0].reset_fee_estimate(),
