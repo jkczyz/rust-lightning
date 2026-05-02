@@ -1151,6 +1151,20 @@ impl EventQueues {
 		}
 	}
 
+	fn clear_link(&mut self, link: &PeerLink) {
+		match (link.node_a, link.node_b) {
+			(0, 1) | (1, 0) => {
+				self.ab.clear();
+				self.ba.clear();
+			},
+			(1, 2) | (2, 1) => {
+				self.bc.clear();
+				self.cb.clear();
+			},
+			_ => panic!("unsupported link"),
+		}
+	}
+
 	fn drain_on_disconnect(&mut self, edge_node: usize, nodes: &[HarnessNode<'_>; 3]) {
 		match edge_node {
 			0 => {
@@ -1254,17 +1268,7 @@ impl PeerLink {
 			panic!("unsupported link topology")
 		};
 		queues.drain_on_disconnect(edge_node, nodes);
-		match (self.node_a, self.node_b) {
-			(0, 1) | (1, 0) => {
-				queues.ab.clear();
-				queues.ba.clear();
-			},
-			(1, 2) | (2, 1) => {
-				queues.bc.clear();
-				queues.cb.clear();
-			},
-			_ => panic!("unsupported link"),
-		}
+		queues.clear_link(self);
 	}
 
 	fn reconnect(&mut self, nodes: &[HarnessNode<'_>; 3]) {
@@ -1310,17 +1314,7 @@ impl PeerLink {
 		} else {
 			nodes[remaining_node].get_and_clear_pending_msg_events();
 		}
-		match (self.node_a, self.node_b) {
-			(0, 1) | (1, 0) => {
-				queues.ab.clear();
-				queues.ba.clear();
-			},
-			(1, 2) | (2, 1) => {
-				queues.bc.clear();
-				queues.cb.clear();
-			},
-			_ => panic!("unsupported link"),
-		}
+		queues.clear_link(self);
 	}
 }
 
