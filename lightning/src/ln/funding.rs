@@ -539,23 +539,6 @@ fn validate_inputs(inputs: &[FundingTxInput]) -> Result<(), FundingContributionE
 	Ok(())
 }
 
-/// Describes how an amended contribution should source its wallet-backed inputs.
-enum FundingInputs<'a> {
-	None,
-	/// Reuses the contribution's existing inputs while targeting at least `value_added` added to
-	/// the channel after fees. If dropping the change output leaves surplus value, it remains in
-	/// the channel contribution.
-	CoinSelected {
-		value_added: Amount,
-	},
-	/// Replaces the contribution's inputs with the provided set and fully consumes them without a
-	/// change output. The amount added to the channel is recomputed from the input total minus fees,
-	/// while explicit withdrawal outputs still reduce the splice's net value.
-	ManuallySelected {
-		inputs: &'a [FundingTxInput],
-	},
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum FundingInputMode {
 	CoinSelected,
@@ -566,6 +549,42 @@ impl_writeable_tlv_based_enum!(FundingInputMode,
 	(1, CoinSelected) => {},
 	(3, Manual) => {}
 );
+
+/// The current funding-input request held by a [`FundingBuilderInner`].
+///
+/// The two non-`None` variants are mutually exclusive: a request either asks coin selection to
+/// add value to the channel, or fully consumes a fixed set of manually selected inputs. The
+/// [`CoinSelected`] variant maintains the invariant that `value_added > 0`; a zero-value request
+/// is represented by [`None`].
+///
+/// [`CoinSelected`]: Self::CoinSelected
+/// [`None`]: Self::None
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FundingInputRequest {
+	None,
+	/// When amending a prior contribution, reuses its existing inputs while targeting at least
+	/// `value_added` added to the channel after fees. If dropping the change output leaves
+	/// surplus value, it remains in the channel contribution.
+	CoinSelected {
+		value_added: Amount,
+	},
+	/// When amending a prior contribution, replaces its inputs with these and fully consumes them
+	/// without a change output. The amount added to the channel is recomputed from the input total
+	/// minus fees, while explicit withdrawal outputs still reduce the splice's net value.
+	Manual {
+		inputs: Vec<FundingTxInput>,
+	},
+}
+
+impl FundingInputRequest {
+	fn mode(&self) -> Option<FundingInputMode> {
+		match self {
+			Self::None => None,
+			Self::CoinSelected { .. } => Some(FundingInputMode::CoinSelected),
+			Self::Manual { .. } => Some(FundingInputMode::Manual),
+		}
+	}
+}
 
 /// The components of a funding transaction contributed by one party.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -683,22 +702,22 @@ impl FundingContribution {
 	/// Returns `None` if the request would require new wallet inputs or cannot accommodate the
 	/// requested feerate.
 	fn amend_without_coin_selection(
-		self, funding_inputs: FundingInputs<'_>, outputs: &[TxOut], target_feerate: FeeRate,
+		self, funding_request: FundingInputRequest, outputs: &[TxOut], target_feerate: FeeRate,
 		max_feerate: FeeRate, holder_balance: Amount,
 	) -> Option<Self> {
 		// NOTE: The contribution returned is not guaranteed to be valid. We defer doing so until
 		// `compute_feerate_adjustment`.
 		let adjust_for_inputs_and_outputs = |contribution: Self,
-		                                     inputs: FundingInputs<'_>,
+		                                     request: FundingInputRequest,
 		                                     outputs: &[TxOut]|
 		 -> Option<Self> {
-			let (target_value_added, inputs, input_mode) = match inputs {
-				FundingInputs::None => (None, Vec::new(), None),
-				FundingInputs::CoinSelected { value_added } => {
+			let (target_value_added, inputs, input_mode) = match request {
+				FundingInputRequest::None => (None, Vec::new(), None),
+				FundingInputRequest::CoinSelected { value_added } => {
 					(Some(value_added), contribution.inputs, Some(FundingInputMode::CoinSelected))
 				},
-				FundingInputs::ManuallySelected { inputs } => {
-					(None, inputs.to_vec(), Some(FundingInputMode::Manual))
+				FundingInputRequest::Manual { inputs } => {
+					(None, inputs, Some(FundingInputMode::Manual))
 				},
 			};
 
@@ -766,7 +785,7 @@ impl FundingContribution {
 		};
 
 		let new_contribution_at_current_feerate =
-			adjust_for_inputs_and_outputs(self, funding_inputs, outputs)?;
+			adjust_for_inputs_and_outputs(self, funding_request, outputs)?;
 		let mut new_contribution_at_target_feerate = new_contribution_at_current_feerate
 			.at_feerate(target_feerate, holder_balance, true)
 			.ok()?;
@@ -1074,8 +1093,7 @@ struct FundingBuilderInner<State> {
 	min_rbf_feerate: Option<FeeRate>,
 	prior_contribution: Option<FundingContribution>,
 	spliceable_balance: Amount,
-	value_added: Amount,
-	manually_selected_inputs: Vec<FundingTxInput>,
+	input_request: FundingInputRequest,
 	outputs: Vec<TxOut>,
 	feerate: FeeRate,
 	max_feerate: FeeRate,
@@ -1113,30 +1131,20 @@ pub struct AsyncFundingBuilder<W>(FundingBuilderInner<AsyncCoinSelectionSource<W
 pub struct SyncFundingBuilder<W>(FundingBuilderInner<SyncCoinSelectionSource<W>>);
 
 impl<State> FundingBuilderInner<State> {
-	fn request_input_mode(&self) -> Option<FundingInputMode> {
-		if !self.manually_selected_inputs.is_empty() {
-			Some(FundingInputMode::Manual)
-		} else if self.value_added != Amount::ZERO {
-			Some(FundingInputMode::CoinSelected)
-		} else {
-			None
-		}
-	}
-
 	fn request_matches_prior(&self, prior_contribution: &FundingContribution) -> bool {
 		let request_matches_prior_inputs =
-			match (self.request_input_mode(), prior_contribution.input_mode) {
-				(Some(FundingInputMode::Manual), Some(FundingInputMode::Manual)) => {
-					let request_inputs =
-						self.manually_selected_inputs.iter().map(|input| input.utxo.outpoint);
+			match (&self.input_request, prior_contribution.input_mode) {
+				(FundingInputRequest::Manual { inputs }, Some(FundingInputMode::Manual)) => {
+					let request_inputs = inputs.iter().map(|input| input.utxo.outpoint);
 					let prior_inputs =
 						prior_contribution.inputs.iter().map(|input| input.utxo.outpoint);
 					request_inputs.eq(prior_inputs)
 				},
-				(Some(FundingInputMode::CoinSelected), Some(FundingInputMode::CoinSelected)) => {
-					self.value_added == prior_contribution.value_added()
-				},
-				(None, None) => true,
+				(
+					FundingInputRequest::CoinSelected { value_added },
+					Some(FundingInputMode::CoinSelected),
+				) => *value_added == prior_contribution.value_added(),
+				(FundingInputRequest::None, None) => true,
 				_ => false,
 			};
 		request_matches_prior_inputs && self.outputs == prior_contribution.outputs
@@ -1145,7 +1153,7 @@ impl<State> FundingBuilderInner<State> {
 	fn build_from_prior_contribution(
 		&mut self, contribution: FundingContribution,
 	) -> Result<FundingContribution, FundingContributionError> {
-		let input_mode = self.request_input_mode();
+		let input_mode = self.input_request.mode();
 
 		if self.request_matches_prior(&contribution) {
 			// Same request, but the feerate may have changed. Adjust the prior contribution
@@ -1165,18 +1173,10 @@ impl<State> FundingBuilderInner<State> {
 				});
 		}
 
-		let funding_inputs = match input_mode {
-			Some(FundingInputMode::Manual) => {
-				FundingInputs::ManuallySelected { inputs: &self.manually_selected_inputs }
-			},
-			Some(FundingInputMode::CoinSelected) => {
-				FundingInputs::CoinSelected { value_added: self.value_added }
-			},
-			None => FundingInputs::None,
-		};
+		let request = core::mem::replace(&mut self.input_request, FundingInputRequest::None);
 		return contribution
 			.amend_without_coin_selection(
-				funding_inputs,
+				request,
 				&self.outputs,
 				self.feerate,
 				self.max_feerate,
@@ -1208,57 +1208,64 @@ impl<State> FundingBuilderInner<State> {
 			return self.build_from_prior_contribution(contribution);
 		}
 
-		if self.value_added == Amount::ZERO {
-			let inputs = &self.manually_selected_inputs;
-			let input_mode = self.request_input_mode();
+		let inputs = match core::mem::replace(&mut self.input_request, FundingInputRequest::None) {
+			FundingInputRequest::None => Vec::new(),
+			FundingInputRequest::Manual { inputs } => inputs,
+			request @ FundingInputRequest::CoinSelected { .. } => {
+				self.input_request = request;
+				return Err(FundingContributionError::MissingCoinSelectionSource);
+			},
+		};
+		let input_mode = if inputs.is_empty() { None } else { Some(FundingInputMode::Manual) };
 
-			let estimated_fee = estimate_transaction_fee(
-				inputs,
-				&self.outputs,
-				None,
-				true,
-				self.shared_input.is_some(),
-				self.feerate,
-			);
+		let estimated_fee = estimate_transaction_fee(
+			&inputs,
+			&self.outputs,
+			None,
+			true,
+			self.shared_input.is_some(),
+			self.feerate,
+		);
 
-			let contribution = FundingContribution {
-				estimated_fee,
-				inputs: core::mem::take(&mut self.manually_selected_inputs),
-				outputs: core::mem::take(&mut self.outputs),
-				change_output: None,
-				feerate: self.feerate,
-				max_feerate: self.max_feerate,
-				is_splice: self.shared_input.is_some(),
-				input_mode,
-			};
-			let net_value = contribution.net_value();
-			if net_value.is_negative() {
-				self.spliceable_balance.checked_sub(net_value.unsigned_abs()).ok_or_else(|| {
-					if contribution.inputs.is_empty() {
-						FundingContributionError::InvalidSpliceValue
-					} else {
-						FundingContributionError::ManuallySelectedInputsInsufficient
-					}
-				})?;
-			}
-
-			return Ok(contribution);
+		let contribution = FundingContribution {
+			estimated_fee,
+			inputs,
+			outputs: core::mem::take(&mut self.outputs),
+			change_output: None,
+			feerate: self.feerate,
+			max_feerate: self.max_feerate,
+			is_splice: self.shared_input.is_some(),
+			input_mode,
+		};
+		let net_value = contribution.net_value();
+		if net_value.is_negative() {
+			self.spliceable_balance.checked_sub(net_value.unsigned_abs()).ok_or_else(|| {
+				if contribution.inputs.is_empty() {
+					FundingContributionError::InvalidSpliceValue
+				} else {
+					FundingContributionError::ManuallySelectedInputsInsufficient
+				}
+			})?;
 		}
 
-		Err(FundingContributionError::MissingCoinSelectionSource)
+		Ok(contribution)
 	}
 
 	fn prepare_coin_selection_request(
 		&self,
 	) -> Result<(Vec<Input>, Vec<TxOut>), FundingContributionError> {
 		let dummy_pubkey = PublicKey::from_slice(&[2; 33]).unwrap();
+		let value_added = match &self.input_request {
+			FundingInputRequest::CoinSelected { value_added } => *value_added,
+			_ => Amount::ZERO,
+		};
 		let shared_output = bitcoin::TxOut {
 			value: self
 				.shared_input
 				.as_ref()
 				.map(|shared_input| shared_input.previous_utxo.value)
 				.unwrap_or(Amount::ZERO)
-				.checked_add(self.value_added)
+				.checked_add(value_added)
 				.ok_or(FundingContributionError::InvalidSpliceValue)?,
 			script_pubkey: make_funding_redeemscript(&dummy_pubkey, &dummy_pubkey).to_p2wsh(),
 		};
@@ -1290,22 +1297,13 @@ impl<State> FundingBuilderInner<State> {
 			}
 		}
 
-		if self.value_added == Amount::ZERO
-			&& self.manually_selected_inputs.is_empty()
-			&& self.outputs.is_empty()
-		{
-			return Err(FundingContributionError::InvalidSpliceValue);
-		}
-
-		if !self.manually_selected_inputs.is_empty() && self.value_added > Amount::ZERO {
-			// Manually selected inputs are a separate request mode from asking coin selection to add
-			// more value to the channel.
+		if matches!(self.input_request, FundingInputRequest::None) && self.outputs.is_empty() {
 			return Err(FundingContributionError::InvalidSpliceValue);
 		}
 
 		if let Some(prior_contribution) = self.prior_contribution.as_ref() {
 			if prior_contribution.input_mode == Some(FundingInputMode::CoinSelected)
-				&& !self.manually_selected_inputs.is_empty()
+				&& matches!(self.input_request, FundingInputRequest::Manual { .. })
 			{
 				// Our prior contribution used coin selection to determine its inputs, but we're
 				// adding manually selected inputs, which is not allowed.
@@ -1317,11 +1315,15 @@ impl<State> FundingBuilderInner<State> {
 		// ensure FundingContribution::net_value() arithmetic cannot overflow. With all
 		// amounts bounded by MAX_MONEY (~2.1e15 sat), the worst-case net_value()
 		// computation is -2 * MAX_MONEY (~-4.2e15), well within i64::MIN (~-9.2e18).
-		if self.value_added > Amount::MAX_MONEY {
-			return Err(FundingContributionError::InvalidSpliceValue);
+		match &self.input_request {
+			FundingInputRequest::None => {},
+			FundingInputRequest::CoinSelected { value_added } => {
+				if *value_added > Amount::MAX_MONEY {
+					return Err(FundingContributionError::InvalidSpliceValue);
+				}
+			},
+			FundingInputRequest::Manual { inputs } => validate_inputs(inputs)?,
 		}
-
-		validate_inputs(&self.manually_selected_inputs)?;
 
 		let mut value_removed = Amount::ZERO;
 		for output in self.outputs.iter() {
@@ -1343,18 +1345,21 @@ impl FundingBuilder {
 			prior_contribution,
 			spliceable_balance,
 		} = template;
-		let (value_added, manually_selected_inputs, outputs) = match prior_contribution.as_ref() {
+		let (input_request, outputs) = match prior_contribution.as_ref() {
 			Some(prior) => {
 				let outputs = prior.outputs.clone();
-				if prior.input_mode == Some(FundingInputMode::Manual) {
-					// `value_added` is intended for coin selection, which is incompatible with
-					// manual input selection.
-					(Amount::ZERO, prior.inputs.clone(), outputs)
-				} else {
-					(prior.value_added(), Vec::new(), outputs)
-				}
+				let input_request = match prior.input_mode {
+					Some(FundingInputMode::Manual) => {
+						FundingInputRequest::Manual { inputs: prior.inputs.clone() }
+					},
+					Some(FundingInputMode::CoinSelected) => {
+						FundingInputRequest::CoinSelected { value_added: prior.value_added() }
+					},
+					None => FundingInputRequest::None,
+				};
+				(input_request, outputs)
 			},
-			None => (Amount::ZERO, Vec::new(), Vec::new()),
+			None => (FundingInputRequest::None, Vec::new()),
 		};
 
 		FundingBuilder(FundingBuilderInner {
@@ -1362,9 +1367,8 @@ impl FundingBuilder {
 			min_rbf_feerate,
 			prior_contribution,
 			spliceable_balance,
-			value_added,
+			input_request,
 			outputs,
-			manually_selected_inputs,
 			feerate,
 			max_feerate,
 			state: NoCoinSelectionSource,
@@ -1405,7 +1409,12 @@ impl FundingBuilder {
 	/// [`FundingContributionError::ManuallySelectedInputsInsufficient`] instead of falling back to
 	/// coin selection.
 	pub fn add_input(mut self, input: FundingTxInput) -> Self {
-		self.0.manually_selected_inputs.push(input);
+		match &mut self.0.input_request {
+			FundingInputRequest::Manual { inputs } => inputs.push(input),
+			request @ (FundingInputRequest::None | FundingInputRequest::CoinSelected { .. }) => {
+				*request = FundingInputRequest::Manual { inputs: vec![input] };
+			},
+		}
 		self
 	}
 
@@ -1420,14 +1429,27 @@ impl FundingBuilder {
 	/// [`FundingBuilder::build`] returns
 	/// [`FundingContributionError::ManuallySelectedInputsInsufficient`] instead of falling back to
 	/// coin selection.
-	pub fn add_inputs(mut self, inputs: Vec<FundingTxInput>) -> Self {
-		self.0.manually_selected_inputs.extend(inputs);
+	pub fn add_inputs(mut self, new_inputs: Vec<FundingTxInput>) -> Self {
+		if new_inputs.is_empty() {
+			return self;
+		}
+		match &mut self.0.input_request {
+			FundingInputRequest::Manual { inputs } => inputs.extend(new_inputs),
+			request @ (FundingInputRequest::None | FundingInputRequest::CoinSelected { .. }) => {
+				*request = FundingInputRequest::Manual { inputs: new_inputs };
+			},
+		}
 		self
 	}
 
 	/// Removes all manually selected inputs whose outpoint matches `outpoint`.
 	pub fn remove_input(mut self, outpoint: &OutPoint) -> Self {
-		self.0.manually_selected_inputs.retain(|input| input.utxo.outpoint != *outpoint);
+		if let FundingInputRequest::Manual { inputs } = &mut self.0.input_request {
+			inputs.retain(|input| input.utxo.outpoint != *outpoint);
+			if inputs.is_empty() {
+				self.0.input_request = FundingInputRequest::None;
+			}
+		}
 		self
 	}
 
@@ -1478,9 +1500,7 @@ impl<State> FundingBuilderInner<State> {
 			min_rbf_feerate: self.min_rbf_feerate,
 			prior_contribution: self.prior_contribution,
 			spliceable_balance: self.spliceable_balance,
-			value_added: self.value_added,
-			manually_selected_inputs: self.manually_selected_inputs,
-
+			input_request: self.input_request,
 			outputs: self.outputs,
 			feerate: self.feerate,
 			max_feerate: self.max_feerate,
@@ -1489,14 +1509,31 @@ impl<State> FundingBuilderInner<State> {
 	}
 
 	fn add_value_inner(mut self, value: Amount) -> Self {
-		self.value_added =
-			Amount::from_sat(self.value_added.to_sat().saturating_add(value.to_sat()));
+		if value == Amount::ZERO {
+			return self;
+		}
+		self.input_request = match self.input_request {
+			FundingInputRequest::None | FundingInputRequest::Manual { .. } => {
+				FundingInputRequest::CoinSelected { value_added: value }
+			},
+			FundingInputRequest::CoinSelected { value_added } => {
+				let value_added =
+					Amount::from_sat(value_added.to_sat().saturating_add(value.to_sat()));
+				FundingInputRequest::CoinSelected { value_added }
+			},
+		};
 		self
 	}
 
 	fn remove_value_inner(mut self, value: Amount) -> Self {
-		self.value_added =
-			Amount::from_sat(self.value_added.to_sat().saturating_sub(value.to_sat()));
+		if let FundingInputRequest::CoinSelected { value_added } = self.input_request {
+			let value_added = Amount::from_sat(value_added.to_sat().saturating_sub(value.to_sat()));
+			self.input_request = if value_added == Amount::ZERO {
+				FundingInputRequest::None
+			} else {
+				FundingInputRequest::CoinSelected { value_added }
+			};
+		}
 		self
 	}
 
@@ -2291,14 +2328,66 @@ mod tests {
 	}
 
 	#[test]
-	fn test_funding_builder_rejects_manual_inputs_with_value_request() {
+	fn test_funding_builder_add_value_after_add_input_switches_to_coin_selection() {
+		// Calling `add_value_inner` while a `Manual` input request is staged drops the manual
+		// inputs and switches to a `CoinSelected` request. With no wallet attached, the
+		// resulting build returns `MissingCoinSelectionSource` rather than the `InvalidSpliceValue`
+		// the two-field representation used to produce.
 		let feerate = FeeRate::from_sat_per_kwu(2000);
 		let builder = FundingTemplate::new(None, None, None, Amount::ZERO)
 			.without_prior_contribution(feerate, FeeRate::MAX)
 			.add_input(funding_input_sats(100_000));
 		let builder = FundingBuilder(builder.0.add_value_inner(Amount::from_sat(1_000)));
 
-		assert!(matches!(builder.build(), Err(FundingContributionError::InvalidSpliceValue),));
+		assert!(matches!(
+			builder.build(),
+			Err(FundingContributionError::MissingCoinSelectionSource),
+		));
+	}
+
+	#[test]
+	fn test_funding_builder_add_value_after_add_input_uses_coin_selection_via_public_api() {
+		// Public-API counterpart of the previous test: staging a manual input on a
+		// `FundingBuilder`, attaching a wallet, then calling `add_value` switches the request to
+		// coin-selected and discards the staged manual input. The wallet's coin-selected UTXO is
+		// the only input in the resulting contribution.
+		let feerate = FeeRate::from_sat_per_kwu(2000);
+		let dropped_input = funding_input_sats(50_000);
+		let coin_selected_input = funding_input_sats(120_000);
+		let value_added = Amount::from_sat(40_000);
+		let change_template = funding_output_sats(0);
+		let estimated_fee = estimate_transaction_fee(
+			std::slice::from_ref(&coin_selected_input),
+			&[],
+			Some(&change_template),
+			true,
+			false,
+			feerate,
+		);
+		let change_value = coin_selected_input.utxo.output.value - value_added - estimated_fee;
+		let wallet = MustPayToWallet {
+			utxo: coin_selected_input.clone(),
+			change_output: Some(TxOut {
+				value: change_value,
+				script_pubkey: change_template.script_pubkey,
+			}),
+			expected_must_pay_to_values: vec![value_added],
+		};
+
+		let contribution = FundingBuilder::new(
+			FundingTemplate::new(None, None, None, Amount::MAX),
+			feerate,
+			FeeRate::MAX,
+		)
+		.add_input(dropped_input.clone())
+		.with_coin_selection_source_sync(wallet)
+		.add_value(value_added)
+		.build()
+		.unwrap();
+
+		assert_eq!(contribution.inputs, vec![coin_selected_input]);
+		assert_eq!(contribution.input_mode, Some(FundingInputMode::CoinSelected));
+		assert_eq!(contribution.value_added(), value_added);
 	}
 
 	#[test]
