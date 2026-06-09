@@ -24,7 +24,9 @@ use crate::ln::channelmanager::{
 use crate::ln::msgs::DecodeError;
 use crate::ln::onion_utils;
 use crate::ln::onion_utils::{DecodedOnionFailure, HTLCFailReason};
-use crate::offers::invoice::{Bolt12Invoice, DerivedSigningPubkey, InvoiceBuilder};
+use crate::offers::invoice::{
+	Bolt12Invoice, DerivedSigningPubkey, InvoiceBuilder, PayableBolt12Invoice,
+};
 use crate::offers::invoice_request::InvoiceRequest;
 use crate::offers::nonce::Nonce;
 use crate::offers::static_invoice::StaticInvoice;
@@ -1093,8 +1095,8 @@ impl OutboundPayments {
 	pub(super) fn send_payment_for_bolt12_invoice<
 		R: Router, ES: EntropySource, NS: NodeSigner, NL: NodeIdLookUp, IH, SP, L: Logger,
 	>(
-		&self, invoice: &Bolt12Invoice, payment_id: PaymentId, router: &R,
-		first_hops: Vec<ChannelDetails>, features: Bolt12InvoiceFeatures, inflight_htlcs: IH,
+		&self, invoice: &PayableBolt12Invoice, router: &R,
+		first_hops: Vec<ChannelDetails>, inflight_htlcs: IH,
 		entropy_source: &ES, node_signer: &NS, node_id_lookup: &NL,
 		secp_ctx: &Secp256k1<secp256k1::All>, best_block_height: u32,
 		pending_events: &Mutex<VecDeque<(events::Event, Option<EventCompletionAction>)>>,
@@ -1104,16 +1106,11 @@ impl OutboundPayments {
 		IH: Fn() -> InFlightHtlcs,
 		SP: Fn(SendAlongPathArgs) -> Result<(), APIError>,
 	{
+		let payment_id = invoice.payment_id();
+		let invoice = invoice.invoice();
 
 		let (payment_hash, retry_strategy, params_config, _) = self
 			.mark_invoice_received_and_get_details(invoice, payment_id)?;
-
-		if invoice.invoice_features().requires_unknown_bits_from(&features) {
-			self.abandon_payment(
-				payment_id, PaymentFailureReason::UnknownRequiredFeatures, pending_events,
-			);
-			return Err(Bolt12PaymentError::UnknownRequiredFeatures);
-		}
 
 		let mut route_params = RouteParameters::from_payment_params_and_value(
 			PaymentParameters::from_bolt12_invoice(&invoice)
@@ -3266,7 +3263,9 @@ mod tests {
 
 		assert_eq!(
 			outbound_payments.send_payment_for_bolt12_invoice(
-				&invoice, payment_id, &&router, vec![], Bolt12InvoiceFeatures::empty(),
+				&invoice.verify_using_payer_data(payment_id, nonce, &expanded_key, &secp_ctx)
+					.unwrap().into_payable(&Bolt12InvoiceFeatures::empty()).unwrap(),
+				&&router, vec![],
 				|| InFlightHtlcs::new(), &&keys_manager, &&keys_manager, &EmptyNodeIdLookUp {},
 				&secp_ctx, 0, &pending_events, |_| panic!(), &log
 			),
@@ -3331,7 +3330,9 @@ mod tests {
 
 		assert_eq!(
 			outbound_payments.send_payment_for_bolt12_invoice(
-				&invoice, payment_id, &&router, vec![], Bolt12InvoiceFeatures::empty(),
+				&invoice.verify_using_payer_data(payment_id, nonce, &expanded_key, &secp_ctx)
+					.unwrap().into_payable(&Bolt12InvoiceFeatures::empty()).unwrap(),
+				&&router, vec![],
 				|| InFlightHtlcs::new(), &&keys_manager, &&keys_manager, &EmptyNodeIdLookUp {},
 				&secp_ctx, 0, &pending_events, |_| panic!(), &log
 			),
@@ -3409,7 +3410,9 @@ mod tests {
 		assert!(!outbound_payments.has_pending_payments());
 		assert_eq!(
 			outbound_payments.send_payment_for_bolt12_invoice(
-				&invoice, payment_id, &&router, vec![], Bolt12InvoiceFeatures::empty(),
+				&invoice.verify_using_payer_data(payment_id, nonce, &expanded_key, &secp_ctx)
+					.unwrap().into_payable(&Bolt12InvoiceFeatures::empty()).unwrap(),
+				&&router, vec![],
 				|| InFlightHtlcs::new(), &&keys_manager, &&keys_manager, &EmptyNodeIdLookUp {},
 				&secp_ctx, 0, &pending_events, |_| panic!(), &log
 			),
@@ -3429,7 +3432,9 @@ mod tests {
 
 		assert_eq!(
 			outbound_payments.send_payment_for_bolt12_invoice(
-				&invoice, payment_id, &&router, vec![], Bolt12InvoiceFeatures::empty(),
+				&invoice.verify_using_payer_data(payment_id, nonce, &expanded_key, &secp_ctx)
+					.unwrap().into_payable(&Bolt12InvoiceFeatures::empty()).unwrap(),
+				&&router, vec![],
 				|| InFlightHtlcs::new(), &&keys_manager, &&keys_manager, &EmptyNodeIdLookUp {},
 				&secp_ctx, 0, &pending_events, |_| Ok(()), &log
 			),
@@ -3440,7 +3445,9 @@ mod tests {
 
 		assert_eq!(
 			outbound_payments.send_payment_for_bolt12_invoice(
-				&invoice, payment_id, &&router, vec![], Bolt12InvoiceFeatures::empty(),
+				&invoice.verify_using_payer_data(payment_id, nonce, &expanded_key, &secp_ctx)
+					.unwrap().into_payable(&Bolt12InvoiceFeatures::empty()).unwrap(),
+				&&router, vec![],
 				|| InFlightHtlcs::new(), &&keys_manager, &&keys_manager, &EmptyNodeIdLookUp {},
 				&secp_ctx, 0, &pending_events, |_| panic!(), &log
 			),

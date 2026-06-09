@@ -2572,15 +2572,15 @@ fn fails_paying_invoice_with_unknown_required_features() {
 	let onion_message = charlie.onion_messenger.next_onion_message_for_peer(david_id).unwrap();
 	david.onion_messenger.handle_onion_message(charlie_id, &onion_message);
 
-	// Confirm that david drops this failed payment from his pending outbound payments.
+	// Confirm that david drops this failed payment from his pending outbound payments. The invoice
+	// is rejected before being marked received, so the failure carries no payment hash.
 	match get_event!(david, Event::PaymentFailed) {
 		Event::PaymentFailed {
 			payment_id: event_payment_id,
-			payment_hash: Some(event_payment_hash),
+			payment_hash: None,
 			reason: Some(event_reason),
 		} => {
 			assert_eq!(event_payment_id, payment_id);
-			assert_eq!(event_payment_hash, payment_hash);
 			assert_eq!(event_reason, PaymentFailureReason::UnknownRequiredFeatures);
 		},
 		_ => panic!("Expected Event::PaymentFailed with reason"),

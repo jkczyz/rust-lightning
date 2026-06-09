@@ -38,7 +38,7 @@ use crate::ln::inbound_payment;
 use crate::offers::async_receive_offer_cache::AsyncReceiveOfferCache;
 use crate::offers::invoice::{
 	Bolt12Invoice, DerivedSigningPubkey, ExplicitSigningPubkey, InvoiceBuilder,
-	DEFAULT_RELATIVE_EXPIRY,
+	VerifiedBolt12Invoice, DEFAULT_RELATIVE_EXPIRY,
 };
 use crate::offers::invoice_request::{
 	InvoiceRequest, InvoiceRequestBuilder, InvoiceRequestVerifiedFromOffer, VerifiedInvoiceRequest,
@@ -485,7 +485,7 @@ impl<MR: MessageRouter, L: Logger> OffersMessageFlow<MR, L> {
 	}
 
 	/// Verifies a [`Bolt12Invoice`] using the provided [`OffersContext`] or the invoice's payer
-	/// metadata, returning the corresponding [`PaymentId`] if successful.
+	/// metadata, returning the corresponding [`VerifiedBolt12Invoice`] if successful.
 	///
 	/// - If an [`OffersContext::OutboundPaymentForOffer`] or
 	///   [`OffersContext::OutboundPaymentForRefund`] with a `nonce` is provided, verification is
@@ -495,7 +495,7 @@ impl<MR: MessageRouter, L: Logger> OffersMessageFlow<MR, L> {
 	/// - If neither condition is met, verification fails.
 	pub fn verify_bolt12_invoice(
 		&self, invoice: &Bolt12Invoice, context: Option<&OffersContext>,
-	) -> Result<PaymentId, ()> {
+	) -> Result<VerifiedBolt12Invoice, ()> {
 		let secp_ctx = &self.secp_ctx;
 		let expanded_key = &self.inbound_payment_key;
 

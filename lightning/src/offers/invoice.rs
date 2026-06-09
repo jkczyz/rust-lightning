@@ -999,10 +999,11 @@ impl Bolt12Invoice {
 	/// Verifies that the invoice was for a request or refund created using the given key by
 	/// checking the payer metadata from the invoice request.
 	///
-	/// Returns the associated [`PaymentId`] to use when sending the payment.
+	/// Returns a [`VerifiedBolt12Invoice`], which must be converted into a [`PayableBolt12Invoice`]
+	/// via [`VerifiedBolt12Invoice::into_payable`] before the payment can be sent.
 	pub fn verify_using_metadata<T: secp256k1::Signing>(
 		&self, key: &ExpandedKey, secp_ctx: &Secp256k1<T>,
-	) -> Result<PaymentId, ()> {
+	) -> Result<VerifiedBolt12Invoice, ()> {
 		let (metadata, iv_bytes) = match &self.contents {
 			InvoiceContents::ForOffer { invoice_request, .. } => {
 				(&invoice_request.inner.payer.0, INVOICE_REQUEST_IV_BYTES)
@@ -1011,25 +1012,30 @@ impl Bolt12Invoice {
 				(&refund.payer.0, REFUND_IV_BYTES_WITH_METADATA)
 			},
 		};
-		self.contents.verify(&self.bytes, metadata, key, iv_bytes, secp_ctx)
+		let payment_id = self.contents.verify(&self.bytes, metadata, key, iv_bytes, secp_ctx)?;
+		Ok(VerifiedBolt12Invoice { invoice: self.clone(), payment_id })
 	}
 
 	/// Verifies that the invoice was for a request or refund created using the given key by
 	/// checking a payment id and nonce included with the [`BlindedMessagePath`] for which the invoice was
 	/// sent through.
+	///
+	/// Returns a [`VerifiedBolt12Invoice`], which must be converted into a [`PayableBolt12Invoice`]
+	/// via [`VerifiedBolt12Invoice::into_payable`] before the payment can be sent.
 	pub fn verify_using_payer_data<T: secp256k1::Signing>(
 		&self, payment_id: PaymentId, nonce: Nonce, key: &ExpandedKey, secp_ctx: &Secp256k1<T>,
-	) -> Result<PaymentId, ()> {
+	) -> Result<VerifiedBolt12Invoice, ()> {
 		let metadata = Metadata::payer_data(payment_id, nonce, key);
 		let iv_bytes = match &self.contents {
 			InvoiceContents::ForOffer { .. } => INVOICE_REQUEST_IV_BYTES,
 			InvoiceContents::ForRefund { .. } => REFUND_IV_BYTES_WITHOUT_METADATA,
 		};
-		self.contents.verify(&self.bytes, &metadata, key, iv_bytes, secp_ctx).and_then(
-			|extracted_payment_id| {
+		self.contents
+			.verify(&self.bytes, &metadata, key, iv_bytes, secp_ctx)
+			.and_then(|extracted_payment_id| {
 				(payment_id == extracted_payment_id).then(|| payment_id).ok_or(())
-			},
-		)
+			})
+			.map(|payment_id| VerifiedBolt12Invoice { invoice: self.clone(), payment_id })
 	}
 
 	pub(crate) fn as_tlv_stream(&self) -> FullInvoiceTlvStreamRef<'_> {
@@ -1065,6 +1071,71 @@ impl Bolt12Invoice {
 	/// Returns the [`TaggedHash`] of the invoice that was signed.
 	pub fn tagged_hash(&self) -> &TaggedHash {
 		&self.tagged_hash
+	}
+}
+
+/// A [`Bolt12Invoice`] that has been verified to correspond to an [`InvoiceRequest`] or [`Refund`]
+/// the payer previously created, as returned by [`Bolt12Invoice::verify_using_metadata`] or
+/// [`Bolt12Invoice::verify_using_payer_data`].
+///
+/// Verification only establishes that the payer requested the invoice; it does not check whether
+/// the payer is able to pay it. Before the invoice can be paid, its features must be checked
+/// against those supported by the payer via [`into_payable`], yielding a [`PayableBolt12Invoice`].
+///
+/// [`InvoiceRequest`]: crate::offers::invoice_request::InvoiceRequest
+/// [`Refund`]: crate::offers::refund::Refund
+/// [`into_payable`]: Self::into_payable
+#[derive(Clone, Debug)]
+pub struct VerifiedBolt12Invoice {
+	invoice: Bolt12Invoice,
+	payment_id: PaymentId,
+}
+
+impl VerifiedBolt12Invoice {
+	/// The verified [`Bolt12Invoice`].
+	pub fn invoice(&self) -> &Bolt12Invoice {
+		&self.invoice
+	}
+
+	/// The [`PaymentId`] to use when sending the payment.
+	pub fn payment_id(&self) -> PaymentId {
+		self.payment_id
+	}
+
+	/// Checks that the invoice does not require any features unknown to or unsupported by the payer,
+	/// as given by `supported_features`, yielding a [`PayableBolt12Invoice`] that may be paid.
+	///
+	/// # Errors
+	///
+	/// Returns [`Bolt12SemanticError::UnknownRequiredFeatures`] if the invoice requires a feature
+	/// not present in `supported_features`.
+	pub fn into_payable(
+		self, supported_features: &Bolt12InvoiceFeatures,
+	) -> Result<PayableBolt12Invoice, Bolt12SemanticError> {
+		if self.invoice.invoice_features().requires_unknown_bits_from(supported_features) {
+			return Err(Bolt12SemanticError::UnknownRequiredFeatures);
+		}
+		Ok(PayableBolt12Invoice { invoice: self.invoice, payment_id: self.payment_id })
+	}
+}
+
+/// A [`Bolt12Invoice`] that has been verified and whose required features are all supported by the
+/// payer, and which is therefore ready to be paid. Produced by [`VerifiedBolt12Invoice::into_payable`].
+#[derive(Clone, Debug)]
+pub struct PayableBolt12Invoice {
+	invoice: Bolt12Invoice,
+	payment_id: PaymentId,
+}
+
+impl PayableBolt12Invoice {
+	/// The invoice to be paid.
+	pub fn invoice(&self) -> &Bolt12Invoice {
+		&self.invoice
+	}
+
+	/// The [`PaymentId`] to use when sending the payment.
+	pub fn payment_id(&self) -> PaymentId {
+		self.payment_id
 	}
 }
 
@@ -1976,8 +2047,11 @@ mod tests {
 		assert_eq!(invoice.invoice_request_features(), &InvoiceRequestFeatures::empty());
 		assert_eq!(invoice.quantity(), None);
 		assert_eq!(
-			invoice.verify_using_payer_data(payment_id, nonce, &expanded_key, &secp_ctx),
-			Ok(payment_id),
+			invoice
+				.verify_using_payer_data(payment_id, nonce, &expanded_key, &secp_ctx)
+				.unwrap()
+				.payment_id(),
+			payment_id,
 		);
 		assert_eq!(invoice.payer_note(), None);
 		assert_eq!(invoice.payment_paths(), payment_paths.as_slice());
@@ -2049,6 +2123,43 @@ mod tests {
 		if let Err(e) = Bolt12Invoice::try_from(buffer) {
 			panic!("error parsing invoice: {:?}", e);
 		}
+	}
+
+	#[test]
+	fn into_payable_fails_with_unknown_required_features() {
+		let expanded_key = ExpandedKey::new([42; 32]);
+		let entropy = FixedEntropy {};
+		let nonce = Nonce::from_entropy_source(&entropy);
+		let secp_ctx = Secp256k1::new();
+		let payment_id = PaymentId([1; 32]);
+
+		let invoice = OfferBuilder::new(recipient_pubkey())
+			.amount_msats(1000)
+			.build()
+			.unwrap()
+			.request_invoice(&expanded_key, nonce, &secp_ctx, payment_id)
+			.unwrap()
+			.build_and_sign()
+			.unwrap()
+			.respond_with_no_std(payment_paths(), payment_hash(), now())
+			.unwrap()
+			.features_unchecked(Bolt12InvoiceFeatures::unknown())
+			.build()
+			.unwrap()
+			.sign(recipient_sign)
+			.unwrap();
+
+		let verified =
+			invoice.verify_using_payer_data(payment_id, nonce, &expanded_key, &secp_ctx).unwrap();
+
+		// The invoice requires a feature the payer does not support, so it cannot be paid.
+		assert_eq!(
+			verified.clone().into_payable(&Bolt12InvoiceFeatures::empty()).unwrap_err(),
+			Bolt12SemanticError::UnknownRequiredFeatures,
+		);
+
+		// Once the payer supports the required feature, the invoice becomes payable.
+		assert!(verified.into_payable(&Bolt12InvoiceFeatures::unknown()).is_ok());
 	}
 
 	#[test]

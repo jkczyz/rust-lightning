@@ -1164,7 +1164,7 @@ mod tests {
 			.sign(recipient_sign)
 			.unwrap();
 		match invoice.verify_using_metadata(&expanded_key, &secp_ctx) {
-			Ok(payment_id) => assert_eq!(payment_id, PaymentId([1; 32])),
+			Ok(invoice) => assert_eq!(invoice.payment_id(), PaymentId([1; 32])),
 			Err(()) => panic!("verification failed"),
 		}
 		assert!(invoice

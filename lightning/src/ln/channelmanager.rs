@@ -95,7 +95,7 @@ use crate::ln::outbound_payment::{
 use crate::ln::types::ChannelId;
 use crate::offers::async_receive_offer_cache::AsyncReceiveOfferCache;
 use crate::offers::flow::{HeldHtlcReplyPath, InvreqResponseInstructions, OffersMessageFlow};
-use crate::offers::invoice::{Bolt12Invoice, UnsignedBolt12Invoice};
+use crate::offers::invoice::{Bolt12Invoice, UnsignedBolt12Invoice, VerifiedBolt12Invoice};
 use crate::offers::invoice_error::InvoiceError;
 use crate::offers::invoice_request::{InvoiceRequest, InvoiceRequestVerifiedFromOffer};
 use crate::offers::nonce::Nonce;
@@ -5823,23 +5823,36 @@ impl<
 		&self, invoice: &Bolt12Invoice, context: Option<&OffersContext>,
 	) -> Result<(), Bolt12PaymentError> {
 		match self.flow.verify_bolt12_invoice(invoice, context) {
-			Ok(payment_id) => self.send_payment_for_verified_bolt12_invoice(invoice, payment_id),
+			Ok(invoice) => self.send_payment_for_verified_bolt12_invoice(invoice),
 			Err(()) => Err(Bolt12PaymentError::UnexpectedInvoice),
 		}
 	}
 
 	fn send_payment_for_verified_bolt12_invoice(
-		&self, invoice: &Bolt12Invoice, payment_id: PaymentId,
+		&self, invoice: VerifiedBolt12Invoice,
 	) -> Result<(), Bolt12PaymentError> {
-		let best_block_height = self.best_block.read().unwrap().height;
+		let payment_id = invoice.payment_id();
 		let _persistence_guard = PersistenceNotifierGuard::notify_on_drop(self);
-		let features = self.bolt12_invoice_features();
+
+		// Confirm the invoice does not require features we don't support before attempting payment.
+		// On failure, fail the pending payment so the user is notified and inform the sender.
+		let invoice = match invoice.into_payable(&self.bolt12_invoice_features()) {
+			Ok(invoice) => invoice,
+			Err(_) => {
+				self.pending_outbound_payments.abandon_payment(
+					payment_id,
+					PaymentFailureReason::UnknownRequiredFeatures,
+					&self.pending_events,
+				);
+				return Err(Bolt12PaymentError::UnknownRequiredFeatures);
+			},
+		};
+
+		let best_block_height = self.best_block.read().unwrap().height;
 		self.pending_outbound_payments.send_payment_for_bolt12_invoice(
-			invoice,
-			payment_id,
+			&invoice,
 			&self.router,
 			self.list_usable_channels(),
-			features,
 			|| self.compute_inflight_htlcs(),
 			&self.entropy_source,
 			&self.node_signer,
@@ -17405,10 +17418,11 @@ impl<
 				})
 			},
 			OffersMessage::Invoice(invoice) => {
-				let payment_id = match self.flow.verify_bolt12_invoice(&invoice, context.as_ref()) {
-					Ok(payment_id) => payment_id,
+				let verified_invoice = match self.flow.verify_bolt12_invoice(&invoice, context.as_ref()) {
+					Ok(verified_invoice) => verified_invoice,
 					Err(()) => return None,
 				};
+				let payment_id = verified_invoice.payment_id();
 
 				let logger = WithContext::for_payment(
 					&self.logger, None, None, Some(invoice.payment_hash()), payment_id,
@@ -17427,7 +17441,7 @@ impl<
 					return None;
 				}
 
-				let res = self.send_payment_for_verified_bolt12_invoice(&invoice, payment_id);
+				let res = self.send_payment_for_verified_bolt12_invoice(verified_invoice);
 				handle_pay_invoice_res!(res, invoice, logger);
 			},
 			OffersMessage::StaticInvoice(invoice) => {
